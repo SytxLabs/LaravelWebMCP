@@ -1,5 +1,13 @@
 # laravel-webmcp
 
+[![Run tests](https://github.com/shaunluedeke/LaravelWebMCP/actions/workflows/tests.yml/badge.svg?style=flat-square)](https://github.com/shaunluedeke/LaravelWebMCP/actions/workflows/tests.yml)
+[![Static analysis](https://github.com/shaunluedeke/LaravelWebMCP/actions/workflows/static.yml/badge.svg?style=flat-square)](https://github.com/shaunluedeke/LaravelWebMCP/actions/workflows/static.yml)
+[![Check code style](https://github.com/shaunluedeke/LaravelWebMCP/actions/workflows/cs.yml/badge.svg?style=flat-square)](https://github.com/shaunluedeke/LaravelWebMCP/actions/workflows/cs.yml)
+[![JavaScript](https://github.com/shaunluedeke/LaravelWebMCP/actions/workflows/js.yml/badge.svg?style=flat-square)](https://github.com/shaunluedeke/LaravelWebMCP/actions/workflows/js.yml)
+[![E2E](https://github.com/shaunluedeke/LaravelWebMCP/actions/workflows/e2e.yml/badge.svg?style=flat-square)](https://github.com/shaunluedeke/LaravelWebMCP/actions/workflows/e2e.yml)
+[![Latest Version on Packagist](https://poser.pugx.org/sytxlabs/laravel-webmcp/v/stable?format=flat-square)](https://packagist.org/packages/sytxlabs/laravel-webmcp)
+[![Total Downloads](https://poser.pugx.org/sytxlabs/laravel-webmcp/downloads?format=flat-square)](https://packagist.org/packages/sytxlabs/laravel-webmcp)
+
 Expose your [`laravel/mcp`](https://laravel.com/docs/mcp) tools and resources to AI agents **in the browser** with
 [WebMCP](https://github.com/webmachinelearning/webmcp) (`document.modelContext`). Write a tool once with laravel/mcp,
 use it over classic MCP **and** as a WebMCP tool, without duplicating code.
