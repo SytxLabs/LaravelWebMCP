@@ -47,7 +47,8 @@ it('collects streamed transport messages and ignores non-string parts', function
     $transport = new InMemoryTransport();
     $transport->onReceive(function (string $raw) use ($transport): void {
         $transport->send("echo:{$raw}");
-        $transport->stream(fn () => ['a', 1, new class implements Stringable {
+        $transport->stream(fn () => ['a', 1, new class implements Stringable
+        {
             public function __toString(): string
             {
                 return 'b';

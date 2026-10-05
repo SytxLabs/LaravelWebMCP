@@ -365,6 +365,6 @@ it('rejects non-json bodies and bodies over the declared limit', function () {
 it('rejects malformed arguments for the generic resource reader', function () {
     config(['webmcp.resources.generic_reader' => true, 'webmcp.resources.require_authorization' => false]);
 
-    callTool('read-resource', ['uri' => 'file://resources/bridge', 'extra' => 1])->assertOk()->assertJson(['isError' => true]);
-    callTool('read-resource', ['uri' => 5])->assertOk()->assertJson(['isError' => true]);
+    readResource('read-resource', ['uri' => 'file://resources/bridge', 'extra' => 1])->assertOk()->assertJson(['isError' => true]);
+    readResource('read-resource', ['uri' => 5])->assertOk()->assertJson(['isError' => true]);
 });
