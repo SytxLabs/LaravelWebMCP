@@ -1,0 +1,70 @@
+{
+    "name": "sytxlabs/laravel-webmcp",
+    "description": "Expose laravel/mcp tools and resources as WebMCP tools (document.modelContext) in the browser.",
+    "keywords": ["laravel", "mcp", "webmcp", "model-context-protocol", "ai", "agents"],
+    "license": "MIT",
+    "type": "library",
+    "authors": [
+        { "name": "SytxLabs" }
+    ],
+    "require": {
+        "php": "^8.3",
+        "illuminate/contracts": "^12.41.1|^13.0",
+        "illuminate/http": "^12.41.1|^13.0",
+        "illuminate/routing": "^12.41.1|^13.0",
+        "illuminate/support": "^12.41.1|^13.0",
+        "illuminate/view": "^12.41.1|^13.0",
+        "laravel/mcp": "^1.0.1"
+    },
+    "require-dev": {
+        "larastan/larastan": "^3.0",
+        "portavice/laravel-pint-config": "^3.0",
+        "livewire/livewire": "^3.6|^4.0",
+        "orchestra/testbench": "^10.0|^11.0",
+        "pestphp/pest": "^3.0|^4.0",
+        "pestphp/pest-plugin-laravel": "^3.0|^4.0"
+    },
+    "suggest": {
+        "livewire/livewire": "Enables #[WebMcpAction] on Livewire component methods (^3.6|^4.0)."
+    },
+    "autoload": {
+        "psr-4": {
+            "SytxLabs\\LaravelWebMcp\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "SytxLabs\\LaravelWebMcp\\Tests\\": "tests/",
+            "Workbench\\App\\": "workbench/app/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "SytxLabs\\LaravelWebMcp\\WebMcpServiceProvider"
+            ],
+            "aliases": {
+                "WebMcp": "SytxLabs\\LaravelWebMcp\\Facades\\WebMcp"
+            }
+        }
+    },
+    "scripts": {
+        "test": "pest",
+        "cs": "pint --test",
+        "csfix": "pint",
+        "analyse": "phpstan analyse",
+        "build": "@php vendor/bin/testbench workbench:build",
+        "serve": [
+            "@build",
+            "@php vendor/bin/testbench serve"
+        ]
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

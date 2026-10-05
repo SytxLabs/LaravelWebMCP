@@ -1,0 +1,22 @@
+name: javascript
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  js:
+    name: Vitest and tsc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - name: Type check
+        run: npx tsc --noEmit -p jsconfig.json
+      - name: Vitest
+        run: npx vitest run
+      - name: npm audit
+        run: npm audit

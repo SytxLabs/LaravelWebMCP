@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "checkJs": true,
+    "allowJs": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["webmcp-types"]
+  },
+  "include": ["resources/js/webmcp-core.js", "resources/js/webmcp.js", "resources/js/webmcp-livewire.js", "resources/js/webmcp-alpine.js", "resources/js/webmcp-forms.js"]
+}

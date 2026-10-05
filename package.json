@@ -1,0 +1,26 @@
+{
+  "name": "@sytxlabs/laravel-webmcp",
+  "version": "0.0.0",
+  "private": false,
+  "type": "module",
+  "description": "Browser runtime for sytxlabs/laravel-webmcp (WebMCP via document.modelContext).",
+  "license": "MIT",
+  "main": "resources/js/webmcp.js",
+  "types": "resources/js/webmcp.d.ts",
+  "files": [
+    "resources/js"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p jsconfig.json",
+    "e2e": "node --test e2e/webmcp.e2e.mjs"
+  },
+  "devDependencies": {
+    "alpinejs": "^3.17.4",
+    "jsdom": "^26.0.0",
+    "playwright-core": "^1.63.0",
+    "typescript": "^5.6.0",
+    "vitest": "^5.0.3",
+    "webmcp-types": "^0.1.10"
+  }
+}

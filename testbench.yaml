@@ -1,0 +1,21 @@
+providers:
+  - Laravel\Mcp\Server\McpServiceProvider
+  - Livewire\LivewireServiceProvider
+  - SytxLabs\LaravelWebMcp\WebMcpServiceProvider
+  - Workbench\App\Providers\WorkbenchServiceProvider
+
+workbench:
+  start: '/'
+  install: false
+  health: false
+  discovers:
+    web: false
+    api: false
+    commands: false
+    components: false
+    views: true
+  build:
+    - asset-publish
+  assets:
+    - webmcp-assets
+  sync: []

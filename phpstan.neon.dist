@@ -1,0 +1,37 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: max
+    # The view-string ignores below are needed on some Larastan/Laravel combinations only.
+    reportUnmatchedIgnoredErrors: false
+    paths:
+        - src
+    ignoreErrors:
+        # Larastan only knows the application's view paths, not the package namespaces registered with
+        # loadViewsFrom(). The views exist (resources/views) and are covered by the Blade/Livewire feature tests.
+        -
+            identifier: argument.type
+            message: '#expects view-string#'
+            path: src/View/Renderer.php
+            count: 1
+        -
+            identifier: argument.type
+            message: '#expects view-string#'
+            path: src/View/Components/Tools.php
+            count: 1
+        -
+            identifier: argument.type
+            message: '#expects view-string#'
+            path: src/Livewire/LivewireActions.php
+            count: 1
+        -
+            identifier: argument.type
+            message: '#expects view-string#'
+            path: src/View/Components/Form.php
+            count: 1
+        # Public trait for users' Livewire components; only the tests use it inside this repository.
+        -
+            identifier: trait.unused
+            path: src/Livewire/ExposesWebMcpActions.php
+            count: 1

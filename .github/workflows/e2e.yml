@@ -1,0 +1,32 @@
+name: e2e
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  e2e:
+    name: Chrome with WebMCP flag
+    runs-on: ubuntu-latest
+    # WebMCP is behind a flag and moves with Chrome releases: informative, does not block.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, json, pdo_sqlite
+          coverage: none
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - uses: browser-actions/setup-chrome@v2
+        id: chrome
+        with:
+          chrome-version: stable
+      - run: composer update --prefer-stable --prefer-dist --no-interaction --no-progress
+      - run: npm install --no-audit --no-fund
+      - name: End-to-end tests
+        run: npm run e2e
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}

@@ -1,0 +1,20 @@
+name: code style
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  cs:
+    name: Pint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, json, pdo_sqlite
+          coverage: none
+      - run: composer update --prefer-stable --prefer-dist --no-interaction --no-progress
+      - name: Pint
+        run: composer cs
