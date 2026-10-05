@@ -1,12 +1,18 @@
 {
     "name": "sytxlabs/laravel-webmcp",
     "description": "Expose laravel/mcp tools and resources as WebMCP tools (document.modelContext) in the browser.",
-    "keywords": ["laravel", "mcp", "webmcp", "model-context-protocol", "ai", "agents"],
+    "keywords": ["laravel", "mcp", "webmcp", "model-context-protocol", "ai", "ai-agents", "agents", "browser", "livewire", "alpinejs", "chrome", "w3c"],
     "license": "MIT",
     "type": "library",
     "authors": [
-        { "name": "SytxLabs" }
+        {
+            "name": "Shaun Lüdeke",
+            "email": "info@sytxlabs.eu",
+            "homepage": "https://sytxlabs.eu",
+            "role": "Developer"
+        }
     ],
+    "homepage": "https://sytxlabs.eu",
     "require": {
         "php": "^8.3",
         "illuminate/contracts": "^12.41.1|^13.0",
