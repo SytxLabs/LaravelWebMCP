@@ -251,7 +251,7 @@ rate limiting (`throttle:webmcp`), argument validation (always server-side, even
 traversal/IDOR protection for resource variables, no class names or paths in the manifest, escaped embedding, same-origin-only runtime.
 
 Treat tool arguments **and tool/resource results as untrusted** (prompt injection): resource tools carry `untrustedContentHint`; set `#[WebMcp(untrusted: true)]` on tools that return user-generated content. Declarative forms are declared by HTML: do not let
-untrusted HTML contain `toolname` attributes. See [docs/SECURITY-REVIEW.md](docs/SECURITY-REVIEW.md) for the review and the known residual risks. To report a vulnerability, see [SECURITY.md](SECURITY.md).
+untrusted HTML contain `toolname` attributes. To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Localization
 
@@ -288,7 +288,7 @@ $fake->assertToolExposed('search')->assertToolNotExposed('place-order')->assertT
 
 ## Spec status
 
-Spec: <https://github.com/webmachinelearning/webmcp> (draft; notes in [docs/WEBMCP-SPEC-NOTES.md](docs/WEBMCP-SPEC-NOTES.md)).
+Spec: <https://github.com/webmachinelearning/webmcp> (draft).
 
 | Spec feature                                                                                 | Status                                                                                                           |
 |----------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|

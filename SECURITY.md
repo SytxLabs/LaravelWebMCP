@@ -44,7 +44,7 @@ In scope:
 - a bypass of the server-enforced confirmation for consequential tools
 - the browser runtime sending requests or credentials to another origin
 
-Out of scope (documented limitations, see `docs/SECURITY-REVIEW.md`):
+Out of scope (documented limitations):
 
 - A holder of a valid bearer token or session can call the Bridge endpoint directly. The guard protects browser callers, it cannot stop an authenticated API client.
 - Livewire requests that an agent started cannot be aborted once sent.
