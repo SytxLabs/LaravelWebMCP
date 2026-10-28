@@ -105,3 +105,10 @@ it('takes origins from a resolver per request', function () {
 it('lets requests without Origin pass (same-origin or tools like curl)', function () {
     $this->get('/webmcp/exec/embed/manifest')->assertOk()->assertHeaderMissing('Access-Control-Allow-Origin');
 });
+
+it('tells the browser whether to keep structuredContent of Bridge results', function () {
+    $this->get('/webmcp/exec/embed/manifest')->assertJsonPath('structuredContent', false);
+
+    config(['webmcp.features.structured_content' => true]);
+    $this->get('/webmcp/exec/embed/manifest')->assertJsonPath('structuredContent', true);
+});

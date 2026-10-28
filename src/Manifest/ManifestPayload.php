@@ -66,6 +66,7 @@ final class ManifestPayload
             'header' => $this->settings->string('header', 'X-WebMCP'),
             'encodeVariables' => $this->settings->bool('resources.encode_variables', false),
             'confirmation' => ['serverEnforced' => $this->settings->bool('confirmation.server_enforced', false), 'header' => $this->settings->string('confirmation.header', 'X-WebMCP-Confirmation')],
+            'structuredContent' => $this->settings->bool('features.structured_content', false),
         ];
     }
 

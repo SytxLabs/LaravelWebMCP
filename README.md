@@ -132,7 +132,7 @@ class InvoiceResource extends Resource implements HasUriTemplate, AuthorizesWebM
 | Execution                     | in-process through laravel/mcp's public API                   | your existing MCP endpoint                                                           |
 | Opt-in enforced on the server | always                                                        | with `EnforceWebMcpExposure` (see below)                                             |
 
-Both return the same result to the browser: `{ content: [{ type: "text", text }], isError?: true }`.
+Both return the same result to the browser: `{ content: [{ type: "text", text }], isError?: true }`, plus `structuredContent` in both modes when `features.structured_content` is on.
 Failures are **resolved results with `isError: true`**, not rejections, because a rejected `execute()` reaches the agent
 as a bare `UnknownError` without the message (`errors.mode = reject` switches this). Validation errors become a short
 text ("The city field is required."), generator/SSE responses are collected into one result, notifications are dropped.

@@ -859,7 +859,7 @@ async function callBridge(state, def, args, signal, confirmation = null, retried
         }
         return errorResult(String(message.error.message || 'The request failed.'));
     }
-    return def.bridge.method === 'tools/call' ? mapToolResult(message.result) : mapResourceResult(message.result);
+    return def.bridge.method === 'tools/call' ? mapToolResult(message.result, Boolean(state.payload.structuredContent)) : mapResourceResult(message.result);
 }
 
 /**
@@ -942,9 +942,10 @@ function parseSse(text) {
 
 /**
  * @param {any} result
+ * @param {boolean} [keepStructured] keep structuredContent (config features.structured_content, as in Session mode)
  * @returns {Result}
  */
-function mapToolResult(result) {
+function mapToolResult(result, keepStructured = false) {
     const items = Array.isArray(result && result.content) ? result.content : [];
     const content = items.map((/** @type {any} */ item) => {
         if (item && item.type === 'text') {
@@ -956,6 +957,9 @@ function mapToolResult(result) {
     const envelope = { content: content.length > 0 ? content : [{ type: 'text', text: '' }] };
     if (result && result.isError === true) {
         envelope.isError = true;
+    }
+    if (keepStructured && result && result.structuredContent !== undefined) {
+        envelope.structuredContent = result.structuredContent;
     }
     return envelope;
 }

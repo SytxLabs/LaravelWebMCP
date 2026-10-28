@@ -1135,3 +1135,24 @@ describe('embed (manifest from another origin)', () => {
         expect(errors.map((error) => error.kind)).toEqual(['embed', 'embed', 'embed', 'manifest']);
     });
 });
+
+describe('structuredContent of Bridge results', () => {
+    const bridgeTool = () => tool({ name: 'renamed', mode: 'bridge', bridge: { method: 'tools/call', name: 'renamed-tool' } });
+    const answer = () => json({ jsonrpc: '2.0', id: 1, result: { content: [{ type: 'text', text: '{"a":1}' }], structuredContent: { a: 1 } } });
+
+    it('drops it by default, like Session mode', async () => {
+        WebMcp.register(payload([bridgeTool()]));
+        await flush();
+        fetchMock.mockResolvedValueOnce(answer());
+
+        expect(await mc.call('renamed', {})).toEqual({ content: [{ type: 'text', text: '{"a":1}' }] });
+    });
+
+    it('keeps it when the manifest says so (features.structured_content)', async () => {
+        WebMcp.register(payload([bridgeTool()], { structuredContent: true }));
+        await flush();
+        fetchMock.mockResolvedValueOnce(answer());
+
+        expect(await mc.call('renamed', {})).toEqual({ content: [{ type: 'text', text: '{"a":1}' }], structuredContent: { a: 1 } });
+    });
+});
