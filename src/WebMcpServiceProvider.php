@@ -13,6 +13,7 @@ use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Foundation\Console\AboutCommand;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Blade;
@@ -26,7 +27,9 @@ use SytxLabs\LaravelWebMcp\Console\CheckCommand;
 use SytxLabs\LaravelWebMcp\Console\InstallCommand;
 use SytxLabs\LaravelWebMcp\Console\ListCommand;
 use SytxLabs\LaravelWebMcp\Forms\DeclarativeForms;
+use SytxLabs\LaravelWebMcp\Http\Middleware\EnsureWebMcpEmbedRequest;
 use SytxLabs\LaravelWebMcp\Http\Middleware\EnsureWebMcpRequest;
+use SytxLabs\LaravelWebMcp\Http\Middleware\HandleWebMcpEmbedCors;
 use SytxLabs\LaravelWebMcp\Livewire\LivewireActions;
 use SytxLabs\LaravelWebMcp\Livewire\ReportsValidationErrors;
 use SytxLabs\LaravelWebMcp\Manifest\ManifestBuilder;
@@ -89,6 +92,11 @@ class WebMcpServiceProvider extends ServiceProvider
             Route::middleware([...$settings->strings('routes.middleware'), EnsureWebMcpRequest::class])->prefix(trim($settings->string('routes.prefix', 'webmcp'), '/'))->group(fn () => $this->loadRoutesFrom(__DIR__.'/../routes/webmcp.php'));
         }
 
+        // Embed mode: stateless routes for pages on other origins, plus CORS for them and for the Bridge endpoints of embeddable servers.
+        // Always registered: both answer 404 / do nothing until webmcp.embed.servers and origins are set (they may change at runtime).
+        Route::middleware([...$settings->strings('embed.middleware'), EnsureWebMcpEmbedRequest::class])->prefix(trim($settings->string('routes.prefix', 'webmcp'), '/'))->group(fn () => $this->loadRoutesFrom(__DIR__.'/../routes/embed.php'));
+        $this->app->make(Kernel::class)->pushMiddleware(HandleWebMcpEmbedCors::class);
+
         if (class_exists(AboutCommand::class)) {
             AboutCommand::add('SytxLabs WebMCP', fn (): array => $this->aboutInformation());
         }
@@ -127,6 +135,7 @@ class WebMcpServiceProvider extends ServiceProvider
             'Servers' => $servers === [] ? 'none' : implode(', ', $servers),
             'Routes' => $settings->bool('routes.enabled', true) ? '/'.trim($settings->string('routes.prefix', 'webmcp'), '/') : 'disabled',
             'Bridge guard' => $settings->string('bridge.enforce', 'browser'),
+            'Embed servers' => $settings->strings('embed.servers') === [] ? 'none' : implode(', ', $settings->strings('embed.servers')),
             'Server-enforced confirmation' => $settings->bool('confirmation.server_enforced', false) ? 'yes' : 'no',
             'Tools per page' => $pageLimit > 0 ? (string) $pageLimit : 'unlimited',
             'Manifest cache' => $settings->bool('cache.enabled', false) ? 'on' : 'off',

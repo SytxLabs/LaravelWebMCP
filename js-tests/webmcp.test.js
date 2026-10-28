@@ -1036,3 +1036,123 @@ describe('SPA navigation (wire:navigate, Turbo)', () => {
         expect(errors[0]).toMatchObject({ kind: 'manifest' });
     });
 });
+
+describe('embed (manifest from another origin)', () => {
+    const remote = 'https://app.example.com';
+    const embedPayload = (tools, extra = {}) => payload(tools, {
+        csrf: null,
+        endpoints: { manifest: remote + '/webmcp/weather/embed/manifest', bridge: remote + '/' },
+        ...extra,
+    });
+    const bridgeTool = () => tool({ name: 'renamed', mode: 'bridge', bridge: { method: 'tools/call', name: 'renamed-tool' } });
+
+    it('loads the manifest without credentials and runs Bridge calls against that origin only', async () => {
+        document.cookie = 'XSRF-TOKEN=page-token';
+        fetchMock
+            .mockResolvedValueOnce(json(embedPayload([bridgeTool()])))
+            .mockResolvedValueOnce(json({ jsonrpc: '2.0', id: 1, result: { content: [{ type: 'text', text: 'renamed' }] } }));
+
+        const registered = await WebMcp.embed(remote + '/webmcp/weather/embed/manifest');
+        await flush();
+
+        expect(registered.tools).toEqual(['renamed']);
+        expect(fetchMock.mock.calls[0][0]).toBe(remote + '/webmcp/weather/embed/manifest');
+        expect(fetchMock.mock.calls[0][1].credentials).toBe('omit');
+
+        const result = await mc.call('renamed', { a: 1 });
+
+        expect(result).toEqual({ content: [{ type: 'text', text: 'renamed' }] });
+        const [url, init] = fetchMock.mock.calls[1];
+        expect(url).toBe(remote + '/');
+        expect(init.credentials).toBe('omit');
+        expect(init.headers).not.toHaveProperty('X-XSRF-TOKEN');
+        expect(init.headers).not.toHaveProperty('X-CSRF-TOKEN');
+        expect(init.headers).not.toHaveProperty('Authorization');
+    });
+
+    it('never sends the bearer token of the page to the embedded origin', async () => {
+        WebMcp.configure({ bearer: () => 'page-secret' });
+        fetchMock
+            .mockResolvedValueOnce(json(embedPayload([bridgeTool()])))
+            .mockResolvedValueOnce(json({ jsonrpc: '2.0', id: 1, result: { content: [{ type: 'text', text: 'ok' }] } }));
+        await WebMcp.embed(remote + '/webmcp/weather/embed/manifest');
+        await flush();
+
+        await mc.call('renamed', {});
+
+        expect(fetchMock.mock.calls[1][1].headers).not.toHaveProperty('Authorization');
+    });
+
+    it('refuses endpoints on the page origin or a third origin', async () => {
+        fetchMock.mockResolvedValueOnce(json(embedPayload([bridgeTool()], { endpoints: { bridge: location.origin + '/mcp/weather' } })));
+        await WebMcp.embed(remote + '/webmcp/weather/embed/manifest');
+        await flush();
+
+        expect((await mc.call('renamed', {})).isError).toBe(true);
+
+        fetchMock.mockResolvedValueOnce(json(embedPayload([bridgeTool()], { endpoints: { bridge: 'https://evil.example/mcp' } })));
+        await WebMcp.embed(remote + '/webmcp/weather/embed/manifest');
+        await flush();
+
+        expect((await mc.call('renamed', {})).isError).toBe(true);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not run session tools of an embedded server', async () => {
+        fetchMock.mockResolvedValueOnce(json(embedPayload([tool()], { endpoints: { tools: remote + '/webmcp/weather/tools/{name}' } })));
+        await WebMcp.embed(remote + '/webmcp/weather/embed/manifest');
+        await flush();
+
+        expect((await mc.call('weather-tool', { city: 'x' })).isError).toBe(true);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('refreshes from the embedded origin without credentials', async () => {
+        fetchMock
+            .mockResolvedValueOnce(json(embedPayload([bridgeTool()])))
+            .mockResolvedValueOnce(json(embedPayload([])));
+        await WebMcp.embed(remote + '/webmcp/weather/embed/manifest');
+        await flush();
+
+        const result = await WebMcp.refresh('weather');
+
+        expect(result.removed).toEqual(['renamed']);
+        expect(fetchMock.mock.calls[1][0]).toBe(remote + '/webmcp/weather/embed/manifest');
+        expect(fetchMock.mock.calls[1][1].credentials).toBe('omit');
+    });
+
+    it('reports invalid URLs, failed and broken manifests as error events', async () => {
+        const errors = listen('error');
+
+        expect(await WebMcp.embed('not a url')).toBeNull();
+        fetchMock.mockResolvedValueOnce(json({}, 403));
+        expect(await WebMcp.embed(remote + '/m')).toBeNull();
+        fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+        expect(await WebMcp.embed(remote + '/m')).toBeNull();
+        fetchMock.mockResolvedValueOnce(json({ version: 99 }));
+        expect(await WebMcp.embed(remote + '/m')).toBeNull();
+
+        expect(errors.map((error) => error.kind)).toEqual(['embed', 'embed', 'embed', 'manifest']);
+    });
+});
+
+describe('structuredContent of Bridge results', () => {
+    const bridgeTool = () => tool({ name: 'renamed', mode: 'bridge', bridge: { method: 'tools/call', name: 'renamed-tool' } });
+    const answer = () => json({ jsonrpc: '2.0', id: 1, result: { content: [{ type: 'text', text: '{"a":1}' }], structuredContent: { a: 1 } } });
+
+    it('drops it by default, like Session mode', async () => {
+        WebMcp.register(payload([bridgeTool()]));
+        await flush();
+        fetchMock.mockResolvedValueOnce(answer());
+
+        expect(await mc.call('renamed', {})).toEqual({ content: [{ type: 'text', text: '{"a":1}' }] });
+    });
+
+    it('keeps it when the manifest says so (features.structured_content)', async () => {
+        WebMcp.register(payload([bridgeTool()], { structuredContent: true }));
+        await flush();
+        fetchMock.mockResolvedValueOnce(answer());
+
+        expect(await mc.call('renamed', {})).toEqual({ content: [{ type: 'text', text: '{"a":1}' }], structuredContent: { a: 1 } });
+    });
+});

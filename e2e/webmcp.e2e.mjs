@@ -80,13 +80,16 @@ const run = (page, name, input = {}) => page.evaluate(async ({ name, input }) =>
         return { __missing: name };
     }
 
-    // The spec IDL says `object inputObject`; Chrome 154 expects the arguments as a JSON string. Try the string
-    // first and fall back to the object, so the harness follows the spec once browsers do.
-    for (const argument of [JSON.stringify(input), input]) {
+    // The spec IDL says `object inputObject`, and current Chrome (155+) takes an object and rejects a string
+    // ("value is not an object"). Chrome 154 expected a JSON string ("parse input arguments"). Try the object first,
+    // fall back to the string only on these argument-form errors. The result is a JSON string or an object.
+    for (const argument of [input, JSON.stringify(input)]) {
         try {
-            return JSON.parse(await document.modelContext.executeTool(tool, argument));
+            const result = await document.modelContext.executeTool(tool, argument);
+
+            return typeof result === 'string' ? JSON.parse(result) : result;
         } catch (error) {
-            if (!/parse input arguments/i.test(error.message)) {
+            if (!/parse input arguments|not an object/i.test(error.message)) {
                 return { __rejected: error.name, message: error.message };
             }
         }

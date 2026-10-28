@@ -48,7 +48,7 @@ const config = {
 /**
  * @typedef {{ controller: AbortController, hash: string, def: any }} ToolRecord
  * @typedef {(def: any, args: Record<string, unknown>, signal: AbortSignal | undefined) => unknown} Runner
- * @typedef {{ slug: string, payload: any, csrf: string | null, tools: Map<string, ToolRecord>, refreshing: Promise<any> | null, lastRefresh: number, runner?: Runner, skipped?: Set<string>, definitions?: any[], embeddedText?: string }} ServerState
+ * @typedef {{ slug: string, payload: any, csrf: string | null, tools: Map<string, ToolRecord>, refreshing: Promise<any> | null, lastRefresh: number, runner?: Runner, skipped?: Set<string>, definitions?: any[], embeddedText?: string, remote?: string | null }} ServerState
  */
 
 /** @type {Map<string, ServerState>} */
@@ -290,7 +290,16 @@ function readEmbedded(slug) {
  * @returns {{ server: string, supported: boolean, tools: string[] } | null}
  */
 function register(server) {
-    const payload = typeof server === 'string' ? readEmbedded(server) : server;
+    return registerPayload(typeof server === 'string' ? readEmbedded(server) : server, null, server);
+}
+
+/**
+ * @param {any} payload
+ * @param {string | null} remote origin of a cross-origin manifest (embed), or null for the page's own origin
+ * @param {string | any} [server] what the caller passed, for the error event
+ * @returns {{ server: string, supported: boolean, tools: string[] } | null}
+ */
+function registerPayload(payload, remote, server = payload) {
     if (!payload || payload.version !== MANIFEST_VERSION || typeof payload.server !== 'string' || !Array.isArray(payload.tools)) {
         emit('error', { server: typeof server === 'string' ? server : null, kind: 'manifest', message: 'Missing or invalid WebMCP manifest.' });
         return null;
@@ -302,10 +311,48 @@ function register(server) {
         removeAll(existing);
     }
     /** @type {ServerState} */
-    const state = {slug: payload.server, payload, csrf: typeof payload.csrf === 'string' ? payload.csrf : null, tools: new Map(), refreshing: null, lastRefresh: Date.now()};
+    const state = {slug: payload.server, payload, csrf: remote === null && typeof payload.csrf === 'string' ? payload.csrf : null, tools: new Map(), refreshing: null, lastRefresh: Date.now(), remote};
     servers.set(state.slug, state);
     reconcile(state, payload.tools);
     return { server: state.slug, supported: getModelContext() !== null, tools: [...state.tools.keys()] };
+}
+
+/**
+ * Loads the manifest of a server that lives on ANOTHER origin and registers its tools (embed mode: a page that is not
+ * rendered by Laravel, e.g. a shop on www.example.com, loads `<script type="module" src="https://app.example.com/webmcp/{server}/embed.js">`).
+ *
+ * The trusted origin is the origin of `url`, which the embed script derives from its own module URL, never from the DOM.
+ * All requests of that server go to this origin only, without cookies (`credentials: 'omit'`), CSRF tokens or the bearer
+ * hook: the page's credentials never leave it. The server answers with CORS headers for the page origins it allows.
+ *
+ * @param {string} url absolute URL of `GET {prefix}/{server}/embed/manifest`
+ * @returns {Promise<{ server: string, supported: boolean, tools: string[] } | null>}
+ */
+async function embed(url) {
+    let remote = 'null';
+    try {
+        remote = new URL(String(url)).origin;
+    } catch {
+        // reported below
+    }
+    if (remote === 'null') {
+        emit('error', { server: null, kind: 'embed', message: 'Invalid embed manifest URL.' });
+        return null;
+    }
+    let payload;
+    try {
+        const response = await http({ remote })(String(url), { method: 'GET', credentials: 'omit', headers: { Accept: 'application/json' } });
+        if (!response.ok) {
+            emit('error', { server: null, kind: 'embed', message: `Embed manifest failed (${response.status}).` });
+            return null;
+        }
+        payload = await response.json();
+    } catch (error) {
+        emit('error', { server: null, kind: 'embed', message: messageOf(error), error });
+        return null;
+    }
+
+    return registerPayload(payload, remote, url);
 }
 
 /**
@@ -414,7 +461,9 @@ async function doRefresh(state) {
     }
     let response;
     try {
-        response = await http()(url, { method: 'GET', credentials: 'same-origin', headers: baseHeaders(state) });
+        response = state.remote
+            ? await http(state)(url, { method: 'GET', credentials: 'omit', headers: { Accept: 'application/json' } })
+            : await http(state)(url, { method: 'GET', credentials: 'same-origin', headers: baseHeaders(state) });
     } catch (error) {
         emit('error', { server: state.slug, kind: 'refresh', message: messageOf(error), error });
         return null;
@@ -442,7 +491,7 @@ async function doRefresh(state) {
         return null;
     }
 
-    if (typeof body.csrf === 'string') {
+    if (typeof body.csrf === 'string' && !state.remote) {
         state.csrf = body.csrf;
     }
     state.payload = { ...state.payload, ...body, endpoints: { ...state.payload.endpoints, ...(body.endpoints || {}) } };
@@ -575,31 +624,35 @@ function baseHeaders(state) {
  * The fetch every request of this runtime goes through. It only talks to the page's own origin: endpoint
  * URLs come from JSON and attributes in the DOM, and DOM that an attacker managed to inject (stored HTML
  * injection) must not be able to make us send the CSRF token or credentials somewhere else.
+ * An embedded server (embed()) talks to its own origin only, never to the page's, and never with credentials.
  *
+ * @param {{ remote?: string | null }} [state]
  * @returns {(url: string, init?: RequestInit) => Promise<Response>}
  */
-function http() {
+function http(state) {
     const send = config.fetch || globalThis.fetch.bind(globalThis);
+    const remote = state && state.remote ? state.remote : null;
     return (url, init) => {
-        assertSameOrigin(url);
-        return send(url, init);
+        assertOrigin(url, remote);
+        return send(url, remote ? { ...init, credentials: 'omit' } : init);
     };
 }
 
 /**
  * @param {string} url
+ * @param {string | null} remote
  */
-function assertSameOrigin(url) {
-    if (typeof location === 'undefined') {
+function assertOrigin(url, remote) {
+    if (typeof location === 'undefined' && remote === null) {
         return;
     }
     let target;
     try {
-        target = new URL(String(url), location.href);
+        target = new URL(String(url), remote || location.href);
     } catch {
         throw new Error('Invalid URL.');
     }
-    if (target.origin !== location.origin) {
+    if (target.origin !== (remote || location.origin)) {
         throw new Error('Cross-origin requests are not allowed.');
     }
 }
@@ -629,7 +682,7 @@ async function callSession(state, def, args, signal, confirmation = null, retrie
     const endpoints = state.payload.endpoints || {};
     const template = def.kind === 'tool' ? endpoints.tools : endpoints.resources;
 
-    if (!template) {
+    if (!template || state.remote) {
         return errorResult('This tool has no endpoint.');
     }
 
@@ -646,7 +699,7 @@ async function callSession(state, def, args, signal, confirmation = null, retrie
     if (csrf) {
         headers['X-CSRF-TOKEN'] = csrf;
     }
-    const response = await http()(template.replace('{name}', encodeURIComponent(def.name)), {method: 'POST', credentials: 'same-origin', headers, body: JSON.stringify(body), signal});
+    const response = await http(state)(template.replace('{name}', encodeURIComponent(def.name)), {method: 'POST', credentials: 'same-origin', headers, body: JSON.stringify(body), signal});
     if (response.status === 419 && !retried) {
         await refresh(state.slug);
         return callSession(state, def, args, signal, confirmation, true);
@@ -767,8 +820,8 @@ async function callBridge(state, def, args, signal, confirmation = null, retried
     if (confirmation) {
         headers[(state.payload.confirmation && state.payload.confirmation.header) || 'X-WebMCP-Confirmation'] = confirmation;
     }
-    let credentials = /** @type {RequestCredentials} */ ('same-origin');
-    if (typeof config.bearer === 'function') {
+    let credentials = /** @type {RequestCredentials} */ (state.remote ? 'omit' : 'same-origin');
+    if (!state.remote && typeof config.bearer === 'function') {
         const token = await config.bearer();
         if (token) {
             headers.Authorization = 'Bearer ' + token;
@@ -782,7 +835,7 @@ async function callBridge(state, def, args, signal, confirmation = null, retried
             headers[xsrf ? 'X-XSRF-TOKEN' : 'X-CSRF-TOKEN'] = csrf;
         }
     }
-    const response = await http()(endpoint, {method: 'POST', credentials, headers, body: JSON.stringify({ jsonrpc: '2.0', id: ++requestId, method: def.bridge.method, params }), signal});
+    const response = await http(state)(endpoint, {method: 'POST', credentials, headers, body: JSON.stringify({ jsonrpc: '2.0', id: ++requestId, method: def.bridge.method, params }), signal});
     if (response.status === 419 && !retried) {
         await refresh(state.slug);
         return callBridge(state, def, args, signal, confirmation, true);
@@ -806,7 +859,7 @@ async function callBridge(state, def, args, signal, confirmation = null, retried
         }
         return errorResult(String(message.error.message || 'The request failed.'));
     }
-    return def.bridge.method === 'tools/call' ? mapToolResult(message.result) : mapResourceResult(message.result);
+    return def.bridge.method === 'tools/call' ? mapToolResult(message.result, Boolean(state.payload.structuredContent)) : mapResourceResult(message.result);
 }
 
 /**
@@ -889,9 +942,10 @@ function parseSse(text) {
 
 /**
  * @param {any} result
+ * @param {boolean} [keepStructured] keep structuredContent (config features.structured_content, as in Session mode)
  * @returns {Result}
  */
-function mapToolResult(result) {
+function mapToolResult(result, keepStructured = false) {
     const items = Array.isArray(result && result.content) ? result.content : [];
     const content = items.map((/** @type {any} */ item) => {
         if (item && item.type === 'text') {
@@ -903,6 +957,9 @@ function mapToolResult(result) {
     const envelope = { content: content.length > 0 ? content : [{ type: 'text', text: '' }] };
     if (result && result.isError === true) {
         envelope.isError = true;
+    }
+    if (keepStructured && result && result.structuredContent !== undefined) {
+        envelope.structuredContent = result.structuredContent;
     }
     return envelope;
 }
@@ -1028,6 +1085,7 @@ function resync() {
 const WebMcp = {
     version: MANIFEST_VERSION,
     register,
+    embed,
     registerScope,
     unregister,
     refresh,
@@ -1153,6 +1211,7 @@ if (typeof window !== 'undefined') {
 export {
     WebMcp,
     register,
+    embed,
     registerScope,
     toResult,
     postTool,
