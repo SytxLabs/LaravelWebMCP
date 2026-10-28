@@ -15,6 +15,7 @@ use it over classic MCP **and** as a WebMCP tool, without duplicating code.
 - **Opt-in, default deny.** Nothing is exposed without `#[WebMcp]`.
 - **Authorization on every call**, on the server, never only in the manifest.
 - **Two modes:** *Session* (package routes, in-process, session + CSRF) and *Bridge* (your `Mcp::web()` endpoint).
+- **Embed mode:** one `<script>` tag lets a page on another origin (a shop that is not built with Laravel) use your Bridge tools.
 - **Integrations:** Blade + vanilla JS, Livewire 3/4 (`#[WebMcpAction]`), Alpine (`x-webmcp`), declarative HTML forms.
 - **Spec first.** Follows the W3C WebMCP draft; known gaps are listed in [Spec status](#spec-status).
 
@@ -150,6 +151,44 @@ It allows only `tools/call` and `resources/read` for Bridge-mode tools/resources
 as Session mode. Bearer-token MCP clients without cookie or marker are untouched (`bridge.enforce`: `browser` | `always` | `never`).
 A script that holds a bearer token has the token's full power; the guard cannot change that.
 
+### Embed mode (pages on other origins)
+
+For pages this app does not render, e.g. a shop on `www.example.com` while the MCP server runs on `mcp.example.com`.
+The page adds **one tag** (in Magento for instance under *Content → Design → Configuration → Footer → Miscellaneous HTML*):
+
+```html
+<script type="module" src="https://mcp.example.com/webmcp/shop/embed.js"></script>
+```
+
+```php
+// config/webmcp.php
+'embed' => [
+    'servers' => ['shop'],
+    'origins' => ['https://www.example.com'],
+],
+
+// or per request (tenant, feature flag); an empty list switches embed mode off for that request
+WebMcp::embedOriginsUsing(fn (Request $request): array => [...]);
+
+Mcp::web('/mcp/shop', ShopServer::class)
+    ->middleware([EnforceWebMcpExposure::class.':shop']);   // keep the guard on the Bridge endpoint
+```
+
+| Route                                   | Serves                                                                         |
+|-----------------------------------------|--------------------------------------------------------------------------------|
+| `GET /webmcp/{server}/embed.js`         | loader module; derives all URLs from its own module URL, never from the DOM    |
+| `GET /webmcp/{server}/embed/manifest`   | guest manifest: only Bridge-mode tools, absolute endpoints, no CSRF token      |
+| `GET /webmcp/_assets/webmcp-core.js`    | the runtime (module scripts need CORS)                                         |
+
+- Only **Bridge-mode** tools are embedded; calls go to the server's `Mcp::web()` endpoint, so its middleware (rate limits, logging) applies.
+- Requests carry **no cookies** (`credentials: 'omit'`), no CSRF token and never the `bearer` hook of the page. CORS headers name the
+  allowed origin and never allow credentials, so a page cannot borrow a session of the app. Tools run as guest.
+- `HandleWebMcpEmbedCors` (global middleware) answers the preflight of the embed routes and of the Bridge endpoints of embeddable servers, nothing else.
+  If you also configure Laravel's `cors.php` for these paths, the headers are set twice; leave them out there.
+- Only secure origins count (`https://`, `http://localhost`). Other origins get 403 on the embed routes and no CORS headers.
+- The page's Content-Security-Policy must allow the app host in `script-src` and `connect-src`.
+- In JS: `WebMcp.embed(manifestUrl)` does the same by hand.
+
 ## Frontend
 
 ### Runtime (`webmcp.js`)
@@ -163,7 +202,7 @@ A script that holds a bearer token has the token's full power; the guard cannot 
 - **Auth at runtime:** `GET /webmcp/{server}/manifest` is called on `webmcp:auth-changed` (dispatch it after login/logout),
   on 401/404, when the tab regains focus, and after 419 (fresh CSRF token, the call is retried once). Removed tools are
   aborted, new ones registered, changed ones replaced.
-- Only talks to its own origin: endpoint URLs come from the DOM, so a foreign URL is refused.
+- Only talks to its own origin: endpoint URLs come from the DOM, so a foreign URL is refused. An embedded server (embed mode) talks to its own origin only, without credentials.
 - Confirmation: `WebMcp.configure({ confirm: async ({ tool, title, description, arguments }) => boolean })`; default `window.confirm`,
   or `WebMcp.createDialogConfirm()` for a native `<dialog>`. Runs for `consequentialHint` tools. It is client-side and no security boundary;
   `confirmation.server_enforced` adds a single-use token step (a speed bump against blind calls, not proof of a user gesture).

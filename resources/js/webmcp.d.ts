@@ -81,6 +81,8 @@ export interface WebMcpApi {
     readonly version: number;
     /** Register a server by slug (reads the embedded manifest) or by manifest payload. */
     register(server: string | object): RegisterResult | null;
+    /** Load the manifest of a server on another origin (embed mode) and register its tools; requests go to that origin only, without credentials. */
+    embed(url: string): Promise<RegisterResult | null>;
     /** Register tools that run in the browser or through a framework adapter (used by Livewire and Alpine). */
     registerScope(id: string, definitions: ScopeToolDefinition[], options: { runner: ScopeRunner; errors?: 'result' | 'reject' }): Scope;
     /** Turn a return value into the result shape agents get (string -> text, object -> JSON text, nothing -> "Done."). */
@@ -110,6 +112,7 @@ export interface WebMcpApi {
 
 export const WebMcp: WebMcpApi;
 export function register(server: string | object): RegisterResult | null;
+export function embed(url: string): Promise<RegisterResult | null>;
 export function registerScope(id: string, definitions: ScopeToolDefinition[], options: { runner: ScopeRunner; errors?: 'result' | 'reject' }): Scope;
 export function toResult(value: unknown): ToolResult;
 export function confirm(request: ConfirmRequest): Promise<boolean>;

@@ -82,6 +82,30 @@ return [
     ],
 
     /*
+    |--------------------------------------------------------------------------
+    | Embed mode (pages on other origins)
+    |--------------------------------------------------------------------------
+    | A page that this app does not render (a shop on another host) adds ONE tag:
+    |
+    |   <script type="module" src="https://this-app.example/webmcp/{server}/embed.js"></script>
+    |
+    | GET  {prefix}/{server}/embed.js         the loader (module, CORS)
+    | GET  {prefix}/{server}/embed/manifest   guest manifest: only Bridge-mode tools, absolute URLs, no CSRF token
+    | GET  {prefix}/_assets/webmcp-core.js    the runtime (module scripts need CORS)
+    |
+    | Calls go to the server's Mcp::web() endpoint (Bridge) without cookies; attach EnforceWebMcpExposure there.
+    | Off unless 'servers' AND origins are set. Origins: list here and/or WebMcp::embedOriginsUsing(fn (Request) => [...]).
+    | Only secure origins count (https, http on localhost). CORS headers never allow credentials.
+    */
+    'embed' => [
+        'servers' => [],                    // slugs that may be embedded
+        'origins' => [],                    // e.g. ['https://www.example.com']
+        'middleware' => ['throttle:webmcp'], // no 'web': the routes are stateless
+        'max_age' => 600,                   // preflight cache (seconds)
+        'manifest_max_age' => 60,           // Cache-Control of the embed manifest (0 = no-store)
+    ],
+
+    /*
     | Extra origins accepted on Session mode requests besides the app's own origin (e.g. a separate SPA host).
     */
     'request_origins' => [],

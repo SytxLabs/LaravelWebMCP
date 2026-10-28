@@ -9,6 +9,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Laravel\Mcp\Server;
 use SytxLabs\LaravelWebMcp\Attributes\WebMcpMode;
 use SytxLabs\LaravelWebMcp\Cache\ManifestCache;
+use SytxLabs\LaravelWebMcp\Embed\EmbedPolicy;
 use SytxLabs\LaravelWebMcp\Manifest\Manifest;
 use SytxLabs\LaravelWebMcp\Manifest\ManifestBuilder;
 use SytxLabs\LaravelWebMcp\Manifest\NameRegistry;
@@ -43,6 +44,17 @@ readonly class WebMcpManager
     public function nonceUsing(?Closure $resolver): void
     {
         NonceResolver::using($resolver);
+    }
+
+    /**
+     * Add page origins that may embed servers (embed mode), resolved per request, e.g. from the current tenant or a feature flag.
+     * Merged with `webmcp.embed.origins`; return an empty list to switch embed mode off for a request. Application wiring, call it once at boot.
+     *
+     * @param (Closure(\Illuminate\Http\Request): (iterable<mixed>|null))|null $resolver
+     */
+    public function embedOriginsUsing(?Closure $resolver): void
+    {
+        EmbedPolicy::using($resolver);
     }
 
     /**

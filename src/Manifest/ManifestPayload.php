@@ -26,16 +26,46 @@ final class ManifestPayload
     public function build(ServerDefinition $server, Manifest $manifest): array
     {
         return [
+            ...$this->conventions($server),
+            'csrf' => $this->csrf(),
+            'endpoints' => $this->endpoints($server),
+            'tools' => array_map(fn (ToolDefinition $tool): array => $this->tool($tool), $manifest->tools),
+        ];
+    }
+
+    /**
+     * Manifest for embed mode (a page on another origin): only Bridge-mode tools, absolute endpoints on this app and no CSRF
+     * token, because the browser calls without cookies. Without a Bridge endpoint there is nothing the page could call.
+     *
+     * @return array<string, mixed>
+     */
+    public function buildEmbed(ServerDefinition $server, Manifest $manifest): array
+    {
+        $bridge = $this->endpoints($server)['bridge'] ?? null;
+        $tools = $bridge === null ? [] : array_values(array_filter($manifest->tools, static fn (ToolDefinition $tool): bool => $tool->mode === WebMcpMode::Bridge));
+
+        return [
+            ...$this->conventions($server),
+            'csrf' => null,
+            'endpoints' => array_filter([
+                'manifest' => Route::has('webmcp.embed.manifest') ? route('webmcp.embed.manifest', ['server' => $server->slug]) : null,
+                'bridge' => $bridge === null ? null : url($bridge),
+            ]),
+            'tools' => array_map(fn (ToolDefinition $tool): array => $this->tool($tool), $tools),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function conventions(ServerDefinition $server): array
+    {
+        return [
             'version' => self::VERSION,
             'server' => $server->slug,
             'locale' => app()->getLocale(),
-            'csrf' => $this->csrf(),
             'errors' => $this->settings->string('errors.mode', 'result') === 'reject' ? 'reject' : 'result',
             'header' => $this->settings->string('header', 'X-WebMCP'),
             'encodeVariables' => $this->settings->bool('resources.encode_variables', false),
             'confirmation' => ['serverEnforced' => $this->settings->bool('confirmation.server_enforced', false), 'header' => $this->settings->string('confirmation.header', 'X-WebMCP-Confirmation')],
-            'endpoints' => $this->endpoints($server),
-            'tools' => array_map(fn (ToolDefinition $tool): array => $this->tool($tool), $manifest->tools),
         ];
     }
 

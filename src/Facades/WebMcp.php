@@ -11,6 +11,7 @@ use SytxLabs\LaravelWebMcp\WebMcpManager;
 /**
  * @method static \SytxLabs\LaravelWebMcp\Servers\ServerDefinition server(string $slug, string $class, ?string $endpoint = null, \SytxLabs\LaravelWebMcp\Attributes\WebMcpMode|string|null $mode = null, ?string $prefix = null)
  * @method static void nonceUsing(\Closure|null $resolver)
+ * @method static void embedOriginsUsing(\Closure|null $resolver)
  * @method static void flush(\Illuminate\Contracts\Auth\Authenticatable|null $user = null)
  * @method static array<string, \SytxLabs\LaravelWebMcp\Servers\ServerDefinition> servers()
  * @method static \SytxLabs\LaravelWebMcp\Manifest\Manifest manifest(string $slug, ?\SytxLabs\LaravelWebMcp\Manifest\NameRegistry $names = null)
