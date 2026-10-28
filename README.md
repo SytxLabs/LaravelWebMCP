@@ -396,8 +396,8 @@ npm run e2e              # real Chrome with the WebMCP flag against the workbenc
 ```
 
 The E2E suite starts the workbench and drives Chrome with `--enable-features=WebMCPTesting`. It uses the browser's own
-`getTools()`/`executeTool()`. Chrome 154 expects the `executeTool` arguments as a JSON **string** (the spec IDL says object);
-the suite tries both.
+`getTools()`/`executeTool()`. Current Chrome takes the `executeTool` arguments as an object (spec IDL); Chrome 154 expected a
+JSON **string**. The suite tries the object first and falls back to the string.
 
 ## License
 
