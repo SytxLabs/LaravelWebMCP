@@ -41,8 +41,14 @@ it('serves the loader as a CORS module that resolves everything against its own 
         ->assertHeader('X-Content-Type-Options', 'nosniff');
     expect($response->headers->get('Content-Type'))->toStartWith('text/javascript')
         ->and($response->headers->get('Vary'))->toContain('Origin')
+        ->and($response->headers->get('Cache-Control'))->toContain('max-age=60')
         ->and($response->getContent())->toContain("from '../_assets/webmcp-core.js?v=")
-        ->and($response->getContent())->toContain("embed(new URL('./embed/manifest', import.meta.url).href)");
+        ->and($response->getContent())->toContain("embed(new URL('./embed/manifest', import.meta.url).href, {");
+    preg_match('/import\.meta\.url\)\.href, (\{.*\})\);\n$/s', (string) $response->getContent(), $inline);
+    $payload = json_decode($inline[1] ?? 'null', true);
+    expect($payload['server'] ?? null)->toBe('exec')
+        ->and($payload)->toHaveKey('csrf', null)
+        ->and(collect($payload['tools'] ?? [])->pluck('mode')->unique()->all())->toBe(['bridge']);
     $this->get('/webmcp/_assets/webmcp-core.js', ['Origin' => SHOP])->assertOk()->assertHeader('Access-Control-Allow-Origin', SHOP);
 });
 
@@ -75,7 +81,10 @@ it('answers the preflight of the Bridge endpoint for allowed origins only, witho
         ->assertHeader('Access-Control-Allow-Methods', 'GET, POST')
         ->assertHeader('Access-Control-Max-Age', '600')
         ->assertHeaderMissing('Access-Control-Allow-Credentials');
-    expect($response->headers->get('Access-Control-Allow-Headers'))->toContain('X-WebMCP')->toContain('Content-Type');
+    expect($response->headers->get('Access-Control-Allow-Headers'))->toContain('X-WebMCP')->toContain('Content-Type')->not->toContain('Mcp-Param');
+
+    $mirrored = $this->options('/mcp/exec', [], ['Origin' => SHOP, 'Access-Control-Request-Method' => 'POST', 'Access-Control-Request-Headers' => 'content-type, mcp-param-region, x-evil header']);
+    expect($mirrored->headers->get('Access-Control-Allow-Headers'))->toContain('mcp-param-region')->not->toContain('x-evil');
 
     $this->options('/mcp/exec', [], ['Origin' => 'https://evil.example', 'Access-Control-Request-Method' => 'POST'])->assertHeaderMissing('Access-Control-Allow-Origin');
 });
@@ -85,6 +94,15 @@ it('adds CORS to Bridge calls and keeps the exposure guard in charge', function 
 
     $call('renamed-tool')->assertOk()->assertHeader('Access-Control-Allow-Origin', SHOP)->assertJsonPath('result.content.0.text', 'renamed');
     $call('weather-tool')->assertForbidden()->assertHeader('Access-Control-Allow-Origin', SHOP);
+});
+
+it('lets allowed page origins past laravel/mcp origin validation for that request only', function () {
+    config(['mcp.allowed_origins' => ['https://admin.example.com']]);
+    $call = fn (string $origin) => $this->postJson('/mcp/exec', ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => ['name' => 'renamed-tool', 'arguments' => (object) []]], ['Origin' => $origin, 'X-WebMCP' => '1']);
+
+    $call(SHOP)->assertOk();
+    expect(config('mcp.allowed_origins'))->toBe(['https://admin.example.com']);
+    $call('https://evil.example')->assertForbidden()->assertJsonPath('error.message', 'Forbidden: The request origin is not allowed.');
 });
 
 it('leaves paths outside embed mode alone', function () {

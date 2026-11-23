@@ -18,6 +18,8 @@ use Laravel\Mcp\Server\Tools\SearchTools;
 use Laravel\Mcp\Server\Tools\ToolSearch;
 use Laravel\Mcp\Server\Transport\FakeTransporter;
 use Laravel\Mcp\Server\Ui\Enums\Visibility;
+use Laravel\Mcp\Support\MirroredParameter;
+use Laravel\Mcp\Support\MirroredParameters;
 use ReflectionProperty;
 use stdClass;
 use SytxLabs\LaravelWebMcp\Attributes\WebMcp;
@@ -31,6 +33,7 @@ use SytxLabs\LaravelWebMcp\Support\Localizer;
 use SytxLabs\LaravelWebMcp\Support\OriginAllowlist;
 use SytxLabs\LaravelWebMcp\Support\Settings;
 use SytxLabs\LaravelWebMcp\Support\ToolNameValidator;
+use Throwable;
 
 /**
  * Builds the WebMCP manifest of one laravel/mcp server for the current request/user.
@@ -208,13 +211,15 @@ final readonly class ManifestCompiler
         $title = $this->limit($this->localizer->text($tool->title()), 'limits.max_title');
         /** @var array<string, mixed> $schema */
         $schema = $this->localizer->schema($this->normalizeSchema(JsonSchemaFactory::object($tool->schema(...))->toArray()));
-        if ($this->settings->bool('features.output_schema', false)) {
+        $outputSchema = null;
+        if ($this->settings->bool('features.output_schema', true)) {
             $output = JsonSchemaFactory::object($tool->outputSchema(...))->toArray();
             if (isset($output['properties'])) {
-                $schema['outputSchema'] = $output;
+                /** @var array<string, mixed> $outputSchema */
+                $outputSchema = $this->localizer->schema($output);
             }
         }
-        $tools[] = new ToolDefinition($definition->slug, $name, $title, $this->description($this->localizer->text($tool->description()), $title), $schema, $flags, $options->exposedTo, $options->mode, $options->confirm ?? isset($flags['consequentialHint']), ToolDefinition::KIND_TOOL, source: $class, mcpName: $tool->name());
+        $tools[] = new ToolDefinition($definition->slug, $name, $title, $this->description($this->localizer->text($tool->description()), $title), $schema, $flags, $options->exposedTo, $options->mode, $options->confirm ?? isset($flags['consequentialHint']), ToolDefinition::KIND_TOOL, source: $class, mcpName: $tool->name(), outputSchema: $outputSchema, mirroredHeaders: $this->mirroredHeaders($tool));
     }
 
     /**
@@ -402,6 +407,24 @@ final readonly class ManifestCompiler
         }
 
         return $name;
+    }
+
+    /**
+     * The `x-mcp-header` arguments laravel/mcp 1.2.1+ checks against `Mcp-Param-*` headers on HTTP calls. Empty on older versions.
+     *
+     * @return list<array{path: list<string>, header: string, type: string}>
+     */
+    private function mirroredHeaders(Tool $tool): array
+    {
+        if (!class_exists(MirroredParameters::class)) {
+            return [];
+        }
+        try {
+            $parameters = MirroredParameters::fromSchema($tool->toArray()['inputSchema'] ?? [])->all()->all();
+            return array_values(array_map(static fn (MirroredParameter $parameter): array => ['path' => $parameter->path->segments, 'header' => $parameter->header(), 'type' => $parameter->type->value], $parameters));
+        } catch (Throwable) {
+            return []; // laravel/mcp rejects such a schema itself
+        }
     }
 
     /**

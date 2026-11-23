@@ -227,8 +227,12 @@ it('never leaks class names, paths or internal fields into the browser manifest'
         ->and($json)->not->toContain('"source"');
 });
 
-it('adds outputSchema only behind the feature flag', function () {
+it('never puts outputSchema inside the inputSchema', function () {
     WebMcp::server('basic', Fixtures\BasicServer::class);
 
-    expect(WebMcp::manifest('basic')->tool('weather-tool')->inputSchema)->not->toHaveKey('outputSchema');
+    $tool = WebMcp::manifest('basic')->tool('weather-tool');
+
+    expect($tool->inputSchema)->not->toHaveKey('outputSchema')
+        ->and($tool->outputSchema)->toBeNull()
+        ->and($tool->toArray())->not->toHaveKey('outputSchema');
 });

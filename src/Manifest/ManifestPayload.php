@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Route;
 use RuntimeException;
 use SytxLabs\LaravelWebMcp\Attributes\WebMcpMode;
 use SytxLabs\LaravelWebMcp\Servers\ServerDefinition;
+use SytxLabs\LaravelWebMcp\Support\Localizer;
 use SytxLabs\LaravelWebMcp\Support\Settings;
 
 /**
@@ -18,7 +19,7 @@ final class ManifestPayload
 {
     public const int VERSION = 1;
 
-    public function __construct(private readonly Settings $settings)
+    public function __construct(private readonly Settings $settings, private readonly Localizer $localizer)
     {
     }
 
@@ -67,6 +68,7 @@ final class ManifestPayload
             'encodeVariables' => $this->settings->bool('resources.encode_variables', false),
             'confirmation' => ['serverEnforced' => $this->settings->bool('confirmation.server_enforced', false), 'header' => $this->settings->string('confirmation.header', 'X-WebMCP-Confirmation')],
             'structuredContent' => $this->settings->bool('features.structured_content', false),
+            'messages' => $this->localizer->confirmMessages(),
         ];
     }
 
@@ -79,7 +81,7 @@ final class ManifestPayload
 
         if ($tool->mode === WebMcpMode::Bridge) {
             $data['bridge'] = match ($tool->kind) {
-                ToolDefinition::KIND_TOOL => ['method' => 'tools/call', 'name' => $tool->mcpName],
+                ToolDefinition::KIND_TOOL => ['method' => 'tools/call', 'name' => $tool->mcpName, ...($tool->mirroredHeaders !== [] ? ['headers' => $tool->mirroredHeaders] : [])],
                 ToolDefinition::KIND_GENERIC_RESOURCE => ['method' => 'resources/read', 'generic' => true],
                 default => $tool->uriTemplate !== null ? ['method' => 'resources/read', 'template' => $tool->uriTemplate] : ['method' => 'resources/read', 'uri' => $tool->uri],
             };

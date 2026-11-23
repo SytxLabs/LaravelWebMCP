@@ -11,4 +11,9 @@ return [
     'generic_reader_description' => 'Liest eine der freigegebenen Ressourcen über ihre URI. Verfügbare URIs: :uris.',
     'generic_reader_uri' => 'Die zu lesende Ressourcen-URI.',
     'submit' => 'Absenden',
+    'no_selection' => 'Keine Auswahl',
+    'confirm_question' => 'Darf der Assistent „:title“ ausführen?',
+    'confirm_allow' => 'Erlauben',
+    'confirm_cancel' => 'Abbrechen',
+    'confirm_arguments' => 'Mit diesen Argumenten:',
 ];

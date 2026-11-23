@@ -1,8 +1,10 @@
+/* Defaults to the text color, which already meets the page's contrast; set --webmcp-active-color to brand it. */
 form[toolname]:tool-form-active {
-    outline: 2px solid #4f46e5;
+    outline: 2px solid var(--webmcp-active-color, currentColor);
     outline-offset: 4px;
 }
 
 form[toolname] :tool-submit-active {
-    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.4);
+    outline: 3px solid var(--webmcp-active-color, currentColor);
+    outline-offset: 2px;
 }

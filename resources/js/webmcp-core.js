@@ -9,7 +9,7 @@
  *  - Feature detection: `"modelContext" in document`. Without it every call is a no-op.
  *  - Unregistration happens ONLY through AbortController.abort() (the spec has no unregisterTool()).
  *  - registerTool() promises reject with the abort reason when a tool is unregistered; that is expected.
- *  - Failures are resolved results `{ content, isError: true }` by default: a rejected execute() reaches the agent as a bare UnknownError without the message.
+ *  - Failures are resolved results `{ content, isError: true }` by default: a rejected execute() reaches the agent as a bare OperationError without the message.
  *
  * @ts-check
  */
@@ -20,7 +20,8 @@ const MANIFEST_VERSION = 1;
 const EVENT_PREFIX = 'webmcp:';
 
 /**
- * @typedef {{ tool: string, title: string, description: string, arguments: Record<string, unknown>, annotations?: Record<string, boolean> }} ConfirmRequest
+ * @typedef {{ question?: string, allow?: string, cancel?: string, arguments?: string }} ConfirmMessages
+ * @typedef {{ tool: string, title: string, description: string, arguments: Record<string, unknown>, annotations?: Record<string, boolean>, messages?: ConfirmMessages }} ConfirmRequest
  * @typedef {{
  *   confirm: (request: ConfirmRequest) => boolean | Promise<boolean>,
  *   resolveModelContext: null | (() => WebMCP.ModelContext | null | undefined),
@@ -55,10 +56,11 @@ const config = {
 const servers = new Map();
 let unsupportedReported = false;
 let requestId = 0;
+let dialogId = 0;
+/** Confirm texts of the last same-origin manifest, for scopes and forms that bring none. @type {ConfirmMessages | undefined} */
+let pageMessages;
 
-// ---------------------------------------------------------------------------------------------
 // events
-// ---------------------------------------------------------------------------------------------
 
 /**
  * @param {string} name
@@ -88,9 +90,7 @@ function off(name, listener) {
     document.removeEventListener(EVENT_PREFIX + name, /** @type {EventListener} */ (listener));
 }
 
-// ---------------------------------------------------------------------------------------------
 // WebMCP access
-// ---------------------------------------------------------------------------------------------
 
 /**
  * @returns {{ mc: WebMCP.ModelContext, legacy: boolean } | null}
@@ -120,9 +120,7 @@ function reportUnsupported() {
     emit('unsupported', {});
 }
 
-// ---------------------------------------------------------------------------------------------
 // registration
-// ---------------------------------------------------------------------------------------------
 
 /**
  * @param {any} def
@@ -150,6 +148,9 @@ function registerTool(state, def, ctx) {
     }
     if (def.inputSchema) {
         tool.inputSchema = def.inputSchema;
+    }
+    if (def.outputSchema) {
+        tool.outputSchema = def.outputSchema;
     }
     if (def.annotations && Object.keys(def.annotations).length > 0) {
         tool.annotations = { ...def.annotations };
@@ -305,14 +306,22 @@ function registerPayload(payload, remote, server = payload) {
         return null;
     }
 
-    const existing = servers.get(payload.server);
+    const csrf = remote === null && typeof payload.csrf === 'string' ? payload.csrf : null;
+    let state = servers.get(payload.server);
 
-    if (existing) {
-        removeAll(existing);
+    if (state && state.remote === remote && !state.runner) {
+        // Same origin: update in place so unchanged tools stay registered (no remove/add churn for agents and inspectors).
+        Object.assign(state, { payload, csrf, lastRefresh: Date.now(), embeddedText: undefined });
+    } else {
+        if (state) {
+            removeAll(state);
+        }
+        state = {slug: payload.server, payload, csrf, tools: new Map(), refreshing: null, lastRefresh: Date.now(), remote};
+        servers.set(state.slug, state);
     }
-    /** @type {ServerState} */
-    const state = {slug: payload.server, payload, csrf: remote === null && typeof payload.csrf === 'string' ? payload.csrf : null, tools: new Map(), refreshing: null, lastRefresh: Date.now(), remote};
-    servers.set(state.slug, state);
+    if (remote === null && payload.messages && typeof payload.messages === 'object') {
+        pageMessages = payload.messages;
+    }
     reconcile(state, payload.tools);
     return { server: state.slug, supported: getModelContext() !== null, tools: [...state.tools.keys()] };
 }
@@ -326,9 +335,10 @@ function registerPayload(payload, remote, server = payload) {
  * hook: the page's credentials never leave it. The server answers with CORS headers for the page origins it allows.
  *
  * @param {string} url absolute URL of `GET {prefix}/{server}/embed/manifest`
+ * @param {any} [payload] the manifest, when the loader inlines it; skips the first fetch
  * @returns {Promise<{ server: string, supported: boolean, tools: string[] } | null>}
  */
-async function embed(url) {
+async function embed(url, payload) {
     let remote = 'null';
     try {
         remote = new URL(String(url)).origin;
@@ -339,7 +349,9 @@ async function embed(url) {
         emit('error', { server: null, kind: 'embed', message: 'Invalid embed manifest URL.' });
         return null;
     }
-    let payload;
+    if (payload && typeof payload === 'object') {
+        return registerPayload(payload, remote, url);
+    }
     try {
         const response = await http({ remote })(String(url), { method: 'GET', credentials: 'omit', headers: { Accept: 'application/json' } });
         if (!response.ok) {
@@ -390,7 +402,7 @@ function toResult(value) {
  * and the error convention are shared with server tools. The runner executes a call: `(def, args, signal) => result | value` (throw to fail, AbortError when the signal aborts).
  *
  * @param {string} id unique scope id, e.g. "livewire:abc123"
- * @param {any[]} definitions tool definitions: { name, description, title?, inputSchema?, annotations?, confirm?, exposedTo? }
+ * @param {any[]} definitions tool definitions: { name, description, title?, inputSchema?, outputSchema?, annotations?, confirm?, exposedTo? }
  * @param {{ runner: Runner, errors?: 'result' | 'reject' }} options
  * @returns {{ id: string, sync: (definitions: any[]) => { added: string[], removed: string[] }, dispose: () => void, tools: () => string[] }}
  */
@@ -501,9 +513,7 @@ async function doRefresh(state) {
     return result;
 }
 
-// ---------------------------------------------------------------------------------------------
 // execution
-// ---------------------------------------------------------------------------------------------
 
 /**
  * @typedef {{ content: Array<{ type: string, text?: string }>, isError?: boolean, [key: string]: unknown }} Result
@@ -558,7 +568,7 @@ async function execute(state, def, args, options) {
     let outcome;
 
     try {
-        if (def.confirm && !(await askConfirm(def, args))) {
+        if (def.confirm && !(await askConfirm(state, def, args))) {
             outcome = errorResult('The user declined this action.');
             emit('failed', { ...detail, reason: 'declined', duration: Date.now() - started });
             return finalize(state, outcome);
@@ -590,12 +600,13 @@ function finalize(state, outcome) {
 }
 
 /**
+ * @param {ServerState} state
  * @param {any} def
  * @param {Record<string, unknown>} args
  * @returns {Promise<boolean>}
  */
-async function askConfirm(def, args) {
-    return confirmRequest({tool: def.name, title: def.title || def.name, description: def.description, arguments: args, annotations: def.annotations});
+async function askConfirm(state, def, args) {
+    return confirmRequest({tool: def.name, title: def.title || def.name, description: def.description, arguments: args, annotations: def.annotations, messages: state.payload.messages});
 }
 
 /**
@@ -605,8 +616,9 @@ async function askConfirm(def, args) {
  * @returns {Promise<boolean>}
  */
 async function confirmRequest(request) {
+    const messages = request.messages || pageMessages;
     try {
-        return Boolean(await config.confirm(request));
+        return Boolean(await config.confirm(messages ? { ...request, messages } : request));
     } catch {
         return false;
     }
@@ -798,7 +810,53 @@ async function postTool(url, args, options = {}) {
     return json && Array.isArray(json.content) ? json : errorResult('The server returned an unexpected response.');
 }
 
-// ---- Bridge ---------------------------------------------------------------------------------
+// Bridge
+
+/**
+ * `Mcp-Param-*` headers for the `x-mcp-header` arguments (laravel/mcp 1.2.1+ rejects calls without them).
+ * Values that are not plain printable ASCII travel as `=?base64?…?=`, like laravel/mcp's own client sends them.
+ *
+ * @param {Array<{ path: string[], header: string, type: string }> | undefined} mirrored
+ * @param {Record<string, unknown>} args
+ * @returns {Record<string, string>}
+ */
+function mirroredHeaders(mirrored, args) {
+    /** @type {Record<string, string>} */
+    const headers = {};
+    for (const { path, header, type } of Array.isArray(mirrored) ? mirrored : []) {
+        /** @type {any} */
+        let value = args;
+        for (const segment of path) {
+            value = value !== null && typeof value === 'object' ? value[segment] : undefined;
+        }
+        let text = null;
+        if (type === 'string' && typeof value === 'string') {
+            text = value;
+        } else if (type === 'boolean' && typeof value === 'boolean') {
+            text = value ? 'true' : 'false';
+        } else if (type === 'integer' && Number.isSafeInteger(value)) {
+            text = String(value);
+        }
+        if (text === null) {
+            continue; // missing or mistyped: the server reports it
+        }
+        const plain = /^[\x21-\x7E]([\x20-\x7E\t]*[\x21-\x7E])?$/.test(text) && !(text.startsWith('=?base64?') && text.endsWith('?='));
+        headers[header] = plain ? text : '=?base64?' + base64(text) + '?=';
+    }
+    return headers;
+}
+
+/**
+ * @param {string} text
+ * @returns {string}
+ */
+function base64(text) {
+    let binary = '';
+    for (const byte of new TextEncoder().encode(text)) {
+        binary += String.fromCharCode(byte);
+    }
+    return btoa(binary);
+}
 
 /**
  * @param {ServerState} state
@@ -819,6 +877,9 @@ async function callBridge(state, def, args, signal, confirmation = null, retried
     const headers = {...baseHeaders(state), Accept: 'application/json, text/event-stream', 'Content-Type': 'application/json'};
     if (confirmation) {
         headers[(state.payload.confirmation && state.payload.confirmation.header) || 'X-WebMCP-Confirmation'] = confirmation;
+    }
+    if (def.bridge.method === 'tools/call') {
+        Object.assign(headers, mirroredHeaders(def.bridge.headers, args));
     }
     let credentials = /** @type {RequestCredentials} */ (state.remote ? 'omit' : 'same-origin');
     if (!state.remote && typeof config.bearer === 'function') {
@@ -974,9 +1035,7 @@ function mapResourceResult(result) {
     return { content: content.length > 0 ? content : [{ type: 'text', text: '' }] };
 }
 
-// ---------------------------------------------------------------------------------------------
 // helpers
-// ---------------------------------------------------------------------------------------------
 
 /**
  * @param {string} name
@@ -1010,9 +1069,40 @@ function metaCsrf() {
     return meta ? meta.getAttribute('content') : null;
 }
 
-// ---------------------------------------------------------------------------------------------
 // confirmation
-// ---------------------------------------------------------------------------------------------
+
+/**
+ * @param {ConfirmRequest} request
+ * @returns {Required<ConfirmMessages>}
+ */
+function confirmTexts(request) {
+    const messages = request.messages || {};
+    return {
+        question: (messages.question || 'Allow the assistant to run ":title"?').replace(':title', request.title),
+        allow: messages.allow || 'Allow',
+        cancel: messages.cancel || 'Cancel',
+        arguments: messages.arguments || 'With these arguments:',
+    };
+}
+
+/**
+ * The arguments as readable JSON, so the user sees what they approve. Empty when there are none.
+ *
+ * @param {Record<string, unknown>} args
+ * @returns {string}
+ */
+function formatArguments(args) {
+    if (!args || typeof args !== 'object' || Object.keys(args).length === 0) {
+        return '';
+    }
+    let text;
+    try {
+        text = JSON.stringify(args, null, 2);
+    } catch {
+        return '';
+    }
+    return text.length > 2000 ? text.slice(0, 2000) + '\n…' : text;
+}
 
 /**
  * Default confirm hook: window.confirm. Replace it with WebMcp.configure({ confirm }) once the spec defines a mechanism (#165, #50) or to show your own dialog. Without a UI the answer is "no".
@@ -1024,7 +1114,9 @@ function defaultConfirm(request) {
     if (typeof window === 'undefined' || typeof window.confirm !== 'function') {
         return false;
     }
-    return window.confirm(`Allow the assistant to run "${request.title}"?\n\n${request.description}`);
+    const texts = confirmTexts(request);
+    const args = formatArguments(request.arguments);
+    return window.confirm(`${texts.question}\n\n${request.description}${args ? `\n\n${texts.arguments}\n${args}` : ''}`);
 }
 
 /**
@@ -1035,20 +1127,38 @@ function defaultConfirm(request) {
  */
 function createDialogConfirm(labels = {}) {
     return (request) => new Promise((resolve) => {
+        const texts = confirmTexts(request);
+        const id = `webmcp-confirm-${++dialogId}`;
         const dialog = document.createElement('dialog');
         dialog.setAttribute('data-webmcp-confirm', '');
+        dialog.setAttribute('aria-labelledby', `${id}-title`);
+        dialog.setAttribute('aria-describedby', `${id}-body`);
         const heading = document.createElement('h2');
-        heading.textContent = labels.title ? labels.title(request) : `Run "${request.title}"?`;
-        const body = document.createElement('p');
-        body.textContent = request.description;
+        heading.id = `${id}-title`;
+        heading.textContent = labels.title ? labels.title(request) : texts.question;
+        const body = document.createElement('div');
+        body.id = `${id}-body`;
+        const description = document.createElement('p');
+        description.textContent = request.description;
+        body.append(description);
+        const args = formatArguments(request.arguments);
+        if (args) {
+            const caption = document.createElement('p');
+            caption.textContent = texts.arguments;
+            const pre = document.createElement('pre');
+            // Long values wrap and scroll inside the dialog instead of widening it past a phone screen.
+            Object.assign(pre.style, { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: '40vh', overflow: 'auto' });
+            pre.textContent = args;
+            body.append(caption, pre);
+        }
         const form = document.createElement('form');
         form.method = 'dialog';
         const cancel = document.createElement('button');
         cancel.value = 'cancel';
-        cancel.textContent = labels.cancelLabel || 'Cancel';
+        cancel.textContent = labels.cancelLabel || texts.cancel;
         const confirmButton = document.createElement('button');
         confirmButton.value = 'confirm';
-        confirmButton.textContent = labels.confirmLabel || 'Allow';
+        confirmButton.textContent = labels.confirmLabel || texts.allow;
         form.append(cancel, confirmButton);
         dialog.append(heading, body, form);
         document.body.append(dialog);
@@ -1061,9 +1171,7 @@ function createDialogConfirm(labels = {}) {
     });
 }
 
-// ---------------------------------------------------------------------------------------------
 // public API
-// ---------------------------------------------------------------------------------------------
 
 /**
  * @param {Partial<Config>} options
@@ -1182,6 +1290,8 @@ function resetLocal() {
     servers.clear();
     unsupportedReported = false;
     requestId = 0;
+    dialogId = 0;
+    pageMessages = undefined;
     config.confirm = defaultConfirm;
     config.resolveModelContext = null;
     config.legacyNavigator = true;

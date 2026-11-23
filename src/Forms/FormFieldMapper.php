@@ -19,7 +19,7 @@ use SytxLabs\LaravelWebMcp\Support\Json;
  *   nullable ("type": [T, "null"]) the field for T, optional
  *
  * Not mappable: object, array (even of enums), oneOf/anyOf/allOf/not/$ref/if-then-else, patternProperties, prefixItems, binary/file strings, multi-type unions, exclusive bounds are ignored (HTML cannot express them), properties without a type or enum.
- * The WebMCP declarative spec does not define the schema synthesis yet (index.bs: TODO); this follows the conservative reading of the explainer: `name` is the property, `toolparamdescription` its description.
+ * The declarative API was removed from the spec draft (#338); this follows Chrome's implementation and the explainer: `name` is the property, `toolparamdescription` its description.
  */
 final class FormFieldMapper
 {

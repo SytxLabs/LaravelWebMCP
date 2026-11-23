@@ -132,7 +132,9 @@ it('renders a declarative form with the explainer attributes', function () {
 it('renders controls with name and toolparamdescription', function () {
     $html = form('<x-webmcp::form :tool="\\SytxLabs\\LaravelWebMcp\\Tests\\Fixtures\\SearchProductsTool::class" method="get" />');
 
-    expect($html)->toMatch('/<input type="text" id="webmcp-search-products-tool-query" name="query"\s+required\s+toolparamdescription="What to search for"\s+minlength="2"\s+maxlength="50"/')
+    expect($html)->toMatch('/<input type="text" id="webmcp-search-products-tool-query" name="query"\s+required\s+toolparamdescription="What to search for"\s+aria-describedby="webmcp-search-products-tool-query-hint"\s+minlength="2"\s+maxlength="50"/')
+        ->and($html)->toContain('<small id="webmcp-search-products-tool-query-hint" class="webmcp-hint">What to search for</small>')
+        ->and($html)->toMatch('/<select [^>]*name="category"[^>]*>\s*<option value="">No selection<\/option>/')
         ->and($html)->toContain('name="max_price"')
         ->and($html)->toMatch('/type="number"[^>]*name="max_price"[^>]*toolparamdescription="Maximum price"[^>]*min="0"[^>]*step="any"/')
         ->and($html)->toMatch('/<select id="[^"]*" name="category"[^>]*toolparamdescription="Product category"/')
@@ -184,6 +186,23 @@ it('marks consequential forms so the script asks for confirmation', function () 
     $html = form('<x-webmcp::form :tool="\\SytxLabs\\LaravelWebMcp\\Tests\\Fixtures\\CancelOrderTool::class" />');
 
     expect($html)->toContain('data-webmcp-confirm')->and($html)->not->toContain('toolautosubmit');
+    preg_match('/data-webmcp-messages="([^"]*)"/', $html, $match);
+    expect(json_decode(html_entity_decode($match[1] ?? ''), true))->toBe([
+        'question' => 'Allow the assistant to run ":title"?',
+        'allow' => 'Allow',
+        'cancel' => 'Cancel',
+        'arguments' => 'With these arguments:',
+    ]);
+});
+
+it('localizes the confirm texts and the empty select option', function () {
+    app()->setLocale('de');
+
+    $search = form('<x-webmcp::form :tool="\\SytxLabs\\LaravelWebMcp\\Tests\\Fixtures\\SearchProductsTool::class" method="get" />');
+    $cancel = form('<x-webmcp::form :tool="\\SytxLabs\\LaravelWebMcp\\Tests\\Fixtures\\CancelOrderTool::class" />');
+
+    expect($search)->toContain('<option value="">Keine Auswahl</option>')
+        ->and(html_entity_decode($cancel))->toContain('"allow":"Erlauben"');
 });
 
 it('can omit generated fields and exclude single properties', function () {

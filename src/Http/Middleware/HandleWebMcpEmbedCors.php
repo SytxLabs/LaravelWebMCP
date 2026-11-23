@@ -17,6 +17,7 @@ use SytxLabs\LaravelWebMcp\Support\Settings;
  *    the Mcp::web() route has no OPTIONS route and its route middleware would not run for one.
  *  - Other responses get `Access-Control-Allow-Origin: <origin>` for an allowed origin and always `Vary: Origin`.
  *  - Never `Access-Control-Allow-Credentials`: embedded calls carry no cookies, so a page cannot borrow a session of this app.
+ *  - laravel/mcp 1.2+ rejects foreign origins on Mcp::web() (ValidateOrigin); an allowed page origin is added to `mcp.allowed_origins` for this request only.
  */
 final readonly class HandleWebMcpEmbedCors
 {
@@ -45,13 +46,22 @@ final readonly class HandleWebMcpEmbedCors
                     'MCP-Protocol-Version',
                     $this->settings->string('header', 'X-WebMCP'),
                     $this->settings->string('confirmation.header', 'X-WebMCP-Confirmation'),
+                    ...(array_values(array_filter(array_map(trim(...), explode(',', (string) $request->headers->get('Access-Control-Request-Headers', ''))), static fn (string $header): bool => preg_match("/^mcp-param-[!#$%&'*+\\-.^_`|~0-9a-z]+$/i", $header) === 1))),
                 ]))),
                 'Access-Control-Max-Age' => (string) max(0, $this->settings->int('embed.max_age', 600)),
                 'Vary' => 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers',
             ]);
         }
 
-        $response = $next($request);
+        $previous = config('mcp.allowed_origins');
+        if ($origin !== null) {
+            config(['mcp.allowed_origins' => [...array_filter((array) ($previous ?? []), is_string(...)), $origin]]);
+        }
+        try {
+            $response = $next($request);
+        } finally {
+            config(['mcp.allowed_origins' => $previous]);
+        }
         $response->setVary('Origin', false);
         if ($origin !== null) {
             $response->headers->set('Access-Control-Allow-Origin', $origin);

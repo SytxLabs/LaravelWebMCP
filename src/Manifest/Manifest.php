@@ -7,7 +7,7 @@ namespace SytxLabs\LaravelWebMcp\Manifest;
 final readonly class Manifest
 {
     /** Bump when this class or ToolDefinition changes shape: it is part of the manifest cache key. */
-    public const int CACHE_VERSION = 1;
+    public const int CACHE_VERSION = 2;
 
     /**
      * @param list<ToolDefinition> $tools

@@ -114,6 +114,20 @@ it('compiles debugging flags, output schemas and skips unregistered entries', fu
 
     expect($tool)->not->toBeNull()
         ->and($tool->annotations['debugging'] ?? null)->toBeTrue()
+        ->and($tool->outputSchema['properties']['ok']['type'] ?? null)->toBe('boolean')
+        ->and($tool->outputSchema['required'] ?? null)->toBe(['ok'])
+        ->and($tool->inputSchema)->not->toHaveKey('outputSchema')
+        ->and($tool->toArray()['outputSchema'] ?? null)->toBe($tool->outputSchema)
         ->and($manifest->toolNames())->toHaveCount(2)
         ->and($manifest->toolNames())->not->toContain('hidden-resource');
+});
+
+it('leaves outputSchema out when the feature flag is off', function (): void {
+    config(['webmcp.features.output_schema' => false]);
+    WebMcpFacade::server('odd', OddServer::class);
+
+    $tool = WebMcpFacade::manifest('odd')->tool('debug-tool');
+
+    expect($tool->outputSchema)->toBeNull()
+        ->and($tool->toArray())->not->toHaveKey('outputSchema');
 });

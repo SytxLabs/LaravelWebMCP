@@ -380,7 +380,7 @@ describe('execution through $wire.$call', () => {
         WebMcp.on('failed', (event) => failed.push(event.detail));
 
         const controller = new AbortController();
-        const pending = mc.executeTool('cart.add-to-cart', { productId: 1 }, { signal: controller.signal });
+        const pending = mc.executeTool(mc.tool('cart.add-to-cart'), { productId: 1 }, { signal: controller.signal });
         await flush();
         controller.abort();
 
@@ -411,7 +411,7 @@ describe('execution through $wire.$call', () => {
         await flush();
         component.$wire.$call.mockRejectedValue({ status: 403 });
 
-        await expect(mc.executeTool('cart.add-to-cart', { productId: 1 })).rejects.toMatchObject({ name: 'UnknownError' });
+        await expect(mc.executeTool(mc.tool('cart.add-to-cart'), { productId: 1 })).rejects.toMatchObject({ name: 'OperationError' });
     });
 
     it('survives a script id containing quotes', async () => {

@@ -12,12 +12,12 @@ Expose your [`laravel/mcp`](https://laravel.com/docs/mcp) tools and resources to
 [WebMCP](https://github.com/webmachinelearning/webmcp) (`document.modelContext`). Write a tool once with laravel/mcp,
 use it over classic MCP **and** as a WebMCP tool, without duplicating code.
 
-- **Opt-in, default deny.** Nothing is exposed without `#[WebMcp]`.
-- **Authorization on every call**, on the server, never only in the manifest.
-- **Two modes:** *Session* (package routes, in-process, session + CSRF) and *Bridge* (your `Mcp::web()` endpoint).
-- **Embed mode:** one `<script>` tag lets a page on another origin (a shop that is not built with Laravel) use your Bridge tools.
-- **Integrations:** Blade + vanilla JS, Livewire 3/4 (`#[WebMcpAction]`), Alpine (`x-webmcp`), declarative HTML forms.
-- **Spec first.** Follows the W3C WebMCP draft; known gaps are listed in [Spec status](#spec-status).
+- Opt-in, **default deny**: nothing is exposed without `#[WebMcp]`.
+- Authorization runs on the server for every call, never only in the manifest.
+- Two modes: *Session* (package routes, in-process, session + CSRF) and *Bridge* (your `Mcp::web()` endpoint).
+- Embed mode: one `<script>` tag lets a page on another origin (a shop that is not built with Laravel) use your Bridge tools.
+- Works with Blade + vanilla JS, Livewire 3/4 (`#[WebMcpAction]`), Alpine (`x-webmcp`) and declarative HTML forms.
+- Follows the W3C WebMCP draft; known gaps are listed in [Spec status](#spec-status).
 
 > WebMCP is an early draft. Browser support is limited (Chrome origin trial / `chrome://flags/#enable-webmcp-testing`).
 > Without the API the runtime does nothing, so it is safe to ship today.
@@ -134,7 +134,7 @@ class InvoiceResource extends Resource implements HasUriTemplate, AuthorizesWebM
 
 Both return the same result to the browser: `{ content: [{ type: "text", text }], isError?: true }`, plus `structuredContent` in both modes when `features.structured_content` is on.
 Failures are **resolved results with `isError: true`**, not rejections, because a rejected `execute()` reaches the agent
-as a bare `UnknownError` without the message (`errors.mode = reject` switches this). Validation errors become a short
+as a bare `OperationError` without the message (`errors.mode = reject` switches this). Validation errors become a short
 text ("The city field is required."), generator/SSE responses are collected into one result, notifications are dropped.
 
 ### Bridge guard
@@ -150,6 +150,10 @@ Mcp::web('/mcp/shop', ShopServer::class)
 It allows only `tools/call` and `resources/read` for Bridge-mode tools/resources the user sees, with the same resource checks
 as Session mode. Bearer-token MCP clients without cookie or marker are untouched (`bridge.enforce`: `browser` | `always` | `never`).
 A script that holds a bearer token has the token's full power; the guard cannot change that.
+
+laravel/mcp 1.2+ checks the `Origin` of browser calls to `Mcp::web()` against `APP_URL` and `mcp.allowed_origins` (403 otherwise).
+Same-origin Bridge calls pass when `APP_URL` matches the page origin; embed origins are let through by the package (see below).
+Since 1.2.1, arguments marked `x-mcp-header` must also arrive as `Mcp-Param-*` headers; the runtime sends them from the manifest.
 
 ### Embed mode (pages on other origins)
 
@@ -176,8 +180,8 @@ Mcp::web('/mcp/shop', ShopServer::class)
 
 | Route                                   | Serves                                                                         |
 |-----------------------------------------|--------------------------------------------------------------------------------|
-| `GET /webmcp/{server}/embed.js`         | loader module; derives all URLs from its own module URL, never from the DOM    |
-| `GET /webmcp/{server}/embed/manifest`   | guest manifest: only Bridge-mode tools, absolute endpoints, no CSRF token      |
+| `GET /webmcp/{server}/embed.js`         | loader module with the manifest inlined; derives all URLs from its own URL     |
+| `GET /webmcp/{server}/embed/manifest`   | guest manifest (for refreshes): Bridge-mode tools, absolute endpoints, no CSRF |
 | `GET /webmcp/_assets/webmcp-core.js`    | the runtime (module scripts need CORS)                                         |
 
 - Only **Bridge-mode** tools are embedded; calls go to the server's `Mcp::web()` endpoint, so its middleware (rate limits, logging) applies.
@@ -186,8 +190,10 @@ Mcp::web('/mcp/shop', ShopServer::class)
 - `HandleWebMcpEmbedCors` (global middleware) answers the preflight of the embed routes and of the Bridge endpoints of embeddable servers, nothing else.
   If you also configure Laravel's `cors.php` for these paths, the headers are set twice; leave them out there.
 - Only secure origins count (`https://`, `http://localhost`). Other origins get 403 on the embed routes and no CORS headers.
+- An allowed origin is added to `mcp.allowed_origins` for its Bridge request only, so laravel/mcp's origin check (1.2+) lets it through; you do not list embed origins twice.
 - The page's Content-Security-Policy must allow the app host in `script-src` and `connect-src`.
-- In JS: `WebMcp.embed(manifestUrl)` does the same by hand.
+- The loader and the manifest share `embed.manifest_max_age` as cache lifetime. The tools register right after the runtime loads, without a manifest request.
+- In JS: `WebMcp.embed(manifestUrl)` does the same by hand; `WebMcp.embed(manifestUrl, payload)` skips the fetch.
 
 ## Frontend
 
@@ -204,7 +210,8 @@ Mcp::web('/mcp/shop', ShopServer::class)
   aborted, new ones registered, changed ones replaced.
 - Only talks to its own origin: endpoint URLs come from the DOM, so a foreign URL is refused. An embedded server (embed mode) talks to its own origin only, without credentials.
 - Confirmation: `WebMcp.configure({ confirm: async ({ tool, title, description, arguments }) => boolean })`; default `window.confirm`,
-  or `WebMcp.createDialogConfirm()` for a native `<dialog>`. Runs for `consequentialHint` tools. It is client-side and no security boundary;
+  or `WebMcp.createDialogConfirm()` for a native `<dialog>`. Both show the arguments and use the `confirm_*` texts of `webmcp::messages`
+  in the app locale (`request.messages`). Runs for `consequentialHint` tools. It is client-side and no security boundary;
   `confirmation.server_enforced` adds a single-use token step (a speed bump against blind calls, not proof of a user gesture).
 - API: `WebMcp.register(server)`, `unregister`, `refresh`, `configure`, `on`/`off`, events `webmcp:invoked|succeeded|failed|registered|unregistered|refreshed|error|skipped|unsupported`.
 - Typed with [`webmcp-types`](https://www.npmjs.com/package/webmcp-types) (`resources/js/webmcp.d.ts`).
@@ -278,8 +285,10 @@ To annotate an existing form: `<form @webmcpForm(SearchProductsTool::class)>` an
 - Mapped: `string` (formats email/uri/date/date-time/time, length, pattern), `integer`/`number` (min, max, step), `boolean` (checkbox), enums (select), nullable.
   **Not mappable:** nested objects, arrays (even of enums), `oneOf`/`anyOf`/`allOf`/`not`/`$ref`/`if`, `patternProperties`, `prefixItems`, binary/file strings, multi-type unions,
   properties without a type (a clear exception names the property); exclusive bounds are ignored.
-- The spec does not define the form-to-schema synthesis yet and leaves the response after a navigation open (#135). A declarative form wins over an imperative tool of the same name.
-- Optional highlight for agent-filled forms: `public/vendor/webmcp/webmcp-forms.css` (`:tool-form-active`, `:tool-submit-active`).
+- The declarative API was removed from the spec draft (#338) and lives on only in Chrome's implementation and the explainer. Expect changes.
+- The form-to-schema synthesis is not specified, and the response after a navigation is open (#135). A declarative form wins over an imperative tool of the same name.
+- Optional highlight for agent-filled forms: `public/vendor/webmcp/webmcp-forms.css` (`:tool-form-active`, `:tool-submit-active`). It uses the text color; set `--webmcp-active-color` to change it.
+- Field descriptions are shown as `<small class="webmcp-hint">` and linked with `aria-describedby`, so people see what the agent sees.
 
 ## Security
 
@@ -337,24 +346,24 @@ $fake->assertToolExposed('search')->assertToolNotExposed('place-order')->assertT
 
 Spec: <https://github.com/webmachinelearning/webmcp> (draft).
 
-| Spec feature                                                                                 | Status                                                                                                           |
-|----------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
-| `registerTool(tool, { signal, exposedTo })`, abort to unregister                             | supported                                                                                                        |
-| `ToolAnnotations` (`readOnlyHint`, `consequentialHint`, `untrustedContentHint`, `debugging`) | supported                                                                                                        |
-| `title`, `inputSchema`                                                                       | supported                                                                                                        |
-| Result format                                                                                | spec says `any`; package uses `{content, isError?}`                                                              |
-| Errors                                                                                       | resolved `isError` result (a rejection reaches the agent as `UnknownError` only); `errors.mode=reject` available |
-| Permissions policy `tools`, `allow="tools"`                                                  | documented, `NotAllowedError` handled                                                                            |
-| Declarative attributes, `SubmitEvent.agentInvoked/respondWith`                               | supported; schema synthesis is not specified yet                                                                 |
-| `outputSchema` (#9)                                                                          | not in the spec; flag `features.output_schema` adds it as an extra member (off)                                  |
-| User confirmation (#165, #50)                                                                | open; client confirm hook + optional server token                                                                |
-| Streaming (#82), progress                                                                    | open; generator output is aggregated, notifications dropped                                                      |
-| Multimodal (#41, #86)                                                                        | open; text fallback with MIME type                                                                               |
-| Cross-document response (#135)                                                               | open; forms answer through `respondWith`                                                                         |
-| Input/output validation by the browser (#92)                                                 | open; always validated server-side                                                                               |
-| `getTools()` / `executeTool()` (in-page agents)                                              | not used by this package                                                                                         |
-| `toolchange` / `toolactivated` / `toolcancel`                                                | not used; runtime events are `webmcp:*`                                                                          |
-| `navigator.modelContext`                                                                     | not in the spec; used only as a fallback                                                                         |
+| Spec feature                                                                                 | Status                                                                                                             |
+|----------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------|
+| `registerTool(tool, { signal, exposedTo })`, abort to unregister                             | supported                                                                                                          |
+| `ToolAnnotations` (`readOnlyHint`, `consequentialHint`, `untrustedContentHint`, `debugging`) | supported                                                                                                          |
+| `title`, `inputSchema`                                                                       | supported                                                                                                          |
+| `outputSchema` (#254, Chrome 159+)                                                           | supported: taken from the tool's `outputSchema()`, flag `features.output_schema` (on)                              |
+| Result format                                                                                | spec says `any`; package uses `{content, isError?}`                                                                |
+| Errors                                                                                       | resolved `isError` result (a rejection reaches the agent as `OperationError` only); `errors.mode=reject` available |
+| Permissions policy `tools`, `allow="tools"`                                                  | documented, `NotAllowedError` handled                                                                              |
+| Declarative attributes, `SubmitEvent.agentInvoked/respondWith`                               | removed from the spec (#338); kept for Chrome's implementation                                                     |
+| User confirmation (#165, #50)                                                                | open; client confirm hook + optional server token                                                                  |
+| Streaming (#82), progress                                                                    | open; generator output is aggregated, notifications dropped                                                        |
+| Multimodal (#41, #86)                                                                        | open; text fallback with MIME type                                                                                 |
+| Cross-document response (#135)                                                               | open; forms answer through `respondWith`                                                                           |
+| Input/output validation by the browser (#92)                                                 | open; arguments are always validated server-side                                                                   |
+| `getTools()` / `executeTool(tool)` (in-page agents)                                          | not used by the runtime; the E2E suite drives them                                                                 |
+| `toolchange` / `toolactivated` / `toolcancel`                                                | not used; runtime events are `webmcp:*`                                                                            |
+| `navigator.modelContext`                                                                     | not in the spec; used only as a fallback                                                                           |
 
 ## Example app
 
@@ -396,8 +405,9 @@ npm run e2e              # real Chrome with the WebMCP flag against the workbenc
 ```
 
 The E2E suite starts the workbench and drives Chrome with `--enable-features=WebMCPTesting`. It uses the browser's own
-`getTools()`/`executeTool()`. Current Chrome takes the `executeTool` arguments as an object (spec IDL); Chrome 154 expected a
-JSON **string**. The suite tries the object first and falls back to the string.
+`getTools()`/`executeTool(tool, input)`. Since Chrome 160 `getTools()` returns `Tool` objects (#348): read members by name,
+because `JSON.stringify(tool)` gives `{}`, `{...tool}` copies nothing, and `tool.window` is now `tool.source`. Chrome 155+
+takes the `executeTool` input as an object; Chrome 154 expected a JSON **string**, so the suite falls back to the string.
 
 ## License
 
