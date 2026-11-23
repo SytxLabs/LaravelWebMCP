@@ -1,9 +1,51 @@
 /**
- * A document.modelContext double that reproduces the WebMCP spec (index.bs at 6891d0e):
+ * A document.modelContext double that reproduces the WebMCP spec (index.bs at 14b6d53):
  * registerTool() checks in spec order and returns promises, abort() unregisters and rejects the
- * registration promise with the abort reason, executeTool() hands the callback its own AbortSignal,
- * stringifies results and turns rejections into UnknownError. There is deliberately no unregisterTool().
+ * registration promise with the abort reason. getTools() returns Tool objects bound to one registration,
+ * so executeTool() runs exactly that registration and a stale Tool fails with NotFoundError even after
+ * the name is registered again. A rejected execute() becomes OperationError. There is no unregisterTool().
  */
+
+const ids = new WeakMap();
+
+/** Read-only view of one registration, like the spec's Tool interface: no own enumerable properties, not cloneable. */
+export class MockTool {
+    #entry;
+
+    constructor(entry) {
+        this.#entry = entry;
+        ids.set(this, entry.id);
+    }
+
+    get name() { return this.#entry.tool.name; }
+
+    get title() { return this.#entry.tool.title ?? ''; }
+
+    get description() { return this.#entry.tool.description; }
+
+    get inputSchema() { return this.#entry.inputSchema; }
+
+    get outputSchema() { return this.#entry.outputSchema; }
+
+    get annotations() { return this.#entry.tool.annotations ? { ...this.#entry.tool.annotations } : null; }
+
+    get origin() { return globalThis.location?.origin ?? 'null'; }
+
+    get source() { return globalThis.window ?? null; }
+}
+
+/** The spec serializes schemas on registration and hands parsed copies out again. */
+function serializeSchema(schema) {
+    if (schema === undefined) {
+        return { value: null };
+    }
+    if (schema === null || typeof schema !== 'object') {
+        throw new TypeError('schema must be an object');
+    }
+
+    return { value: JSON.parse(JSON.stringify(schema)) };
+}
+
 export class MockModelContext extends EventTarget {
     /** @param {{ allowed?: boolean }} [options] allowed=false emulates Permissions-Policy `tools=()` */
     constructor({ allowed = true } = {}) {
@@ -12,6 +54,7 @@ export class MockModelContext extends EventTarget {
         /** @type {Map<string, any>} */
         this.tools = new Map();
         this.registerCalls = [];
+        this.nextId = 0;
     }
 
     registerTool(tool, options = {}) {
@@ -33,12 +76,14 @@ export class MockModelContext extends EventTarget {
             return Promise.reject(new DOMException('empty description', 'InvalidStateError'));
         }
 
-        if (tool.inputSchema !== undefined) {
-            try {
-                JSON.stringify(tool.inputSchema);
-            } catch (error) {
-                return Promise.reject(error);
-            }
+        let inputSchema;
+        let outputSchema;
+
+        try {
+            inputSchema = serializeSchema(tool.inputSchema).value;
+            outputSchema = serializeSchema(tool.outputSchema).value;
+        } catch (error) {
+            return Promise.reject(error);
         }
 
         if (options.signal && options.signal.aborted) {
@@ -61,12 +106,13 @@ export class MockModelContext extends EventTarget {
             }
         }
 
-        this.tools.set(tool.name, { tool, options });
+        const entry = { id: ++this.nextId, tool, options, inputSchema, outputSchema };
+        this.tools.set(tool.name, entry);
 
         return new Promise((resolve, reject) => {
             if (options.signal) {
                 options.signal.addEventListener('abort', () => {
-                    if (this.tools.get(tool.name)?.tool === tool) {
+                    if (this.tools.get(tool.name) === entry) {
                         this.tools.delete(tool.name);
                         this.dispatchEvent(new Event('toolchange'));
                     }
@@ -82,12 +128,21 @@ export class MockModelContext extends EventTarget {
         });
     }
 
-    /** Agent side: executeTool(name, input, { signal }) -> Promise<string>. */
-    executeTool(name, input = {}, options = {}) {
-        const entry = this.tools.get(name);
+    /** Agent side: getTools() -> Promise<Tool[]>. */
+    getTools() {
+        return Promise.resolve(this.#snapshot());
+    }
+
+    /** Agent side: executeTool(tool, input, { signal }) -> Promise<string>. */
+    executeTool(tool, input = {}, options = {}) {
+        if (!ids.has(tool)) {
+            return Promise.reject(new TypeError('executeTool() expects a Tool from getTools()'));
+        }
+
+        const entry = [...this.tools.values()].find((candidate) => candidate.id === ids.get(tool));
 
         if (!entry) {
-            return Promise.reject(new DOMException('unknown tool', 'UnknownError'));
+            return Promise.reject(new DOMException('tool is no longer registered', 'NotFoundError'));
         }
 
         if (options.signal && options.signal.aborted) {
@@ -107,19 +162,36 @@ export class MockModelContext extends EventTarget {
             Promise.resolve()
                 .then(() => entry.tool.execute(input, { signal: controller.signal }))
                 .then(
-                    (value) => resolve(JSON.stringify(value)),
-                    () => reject(new DOMException('tool failed', 'UnknownError')),
+                    (value) => {
+                        const text = JSON.stringify(value);
+
+                        if (text === undefined) {
+                            reject(new DOMException('unserializable result', 'OperationError'));
+                        } else {
+                            resolve(text);
+                        }
+                    },
+                    () => reject(new DOMException('tool rejected', 'OperationError')),
                 );
         });
     }
 
-    /** Convenience for tests: execute and parse. */
+    /** Test shortcut: the current Tool for a name, what getTools() would return for it. */
+    tool(name) {
+        return this.#snapshot().find((tool) => tool.name === name);
+    }
+
+    /** Test shortcut: execute by name and parse. */
     async call(name, input = {}, options = {}) {
-        return JSON.parse(await this.executeTool(name, input, options));
+        return JSON.parse(await this.executeTool(this.tool(name), input, options));
     }
 
     names() {
         return [...this.tools.keys()].sort();
+    }
+
+    #snapshot() {
+        return [...this.tools.values()].map((entry) => new MockTool(entry));
     }
 }
 

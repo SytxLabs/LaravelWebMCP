@@ -167,7 +167,47 @@ describe('registration', () => {
 
         expect(dictionary).not.toHaveProperty('title');
         expect(dictionary).not.toHaveProperty('annotations');
+        expect(dictionary).not.toHaveProperty('outputSchema');
         expect(options).not.toHaveProperty('exposedTo');
+    });
+
+    it('registers outputSchema as its own member', async () => {
+        const outputSchema = { type: 'object', properties: { temperature: { type: 'number' } }, required: ['temperature'] };
+
+        WebMcp.register(payload([tool({ outputSchema })]));
+        await flush();
+
+        const listed = mc.tool('weather-tool');
+
+        expect(mc.registerCalls[0].tool.outputSchema).toEqual(outputSchema);
+        expect(mc.registerCalls[0].tool.inputSchema).not.toHaveProperty('outputSchema');
+        expect(listed.outputSchema).toEqual(outputSchema);
+    });
+
+    it('lists Tool objects whose missing members are null, not undefined', async () => {
+        WebMcp.register(payload([tool({ annotations: {}, inputSchema: undefined })]));
+        await flush();
+
+        const [listed] = await mc.getTools();
+
+        expect(listed.name).toBe('weather-tool');
+        expect(listed.inputSchema).toBeNull();
+        expect(listed.outputSchema).toBeNull();
+        expect(listed.annotations).toBeNull();
+        expect(JSON.stringify(listed)).toBe('{}');
+    });
+
+    it('fails a stale Tool with NotFoundError after the name is registered again', async () => {
+        WebMcp.register(payload());
+        await flush();
+        const stale = mc.tool('weather-tool');
+
+        WebMcp.unregister('weather');
+        WebMcp.register(payload());
+        await flush();
+
+        await expect(mc.executeTool(stale, { city: 'x' })).rejects.toMatchObject({ name: 'NotFoundError' });
+        expect(mc.tool('weather-tool')).toBeDefined();
     });
 
     it('unregisters only through abort() and swallows the expected abort rejection', async () => {
@@ -232,16 +272,43 @@ describe('registration', () => {
         expect(errors[0]).toMatchObject({ name: 'TypeError', message: 'boom' });
     });
 
-    it('replaces a server when registered again, without duplicates or leaks', async () => {
+    it('keeps unchanged tools registered when a server is registered again', async () => {
         WebMcp.register(payload());
         await flush();
+        let changes = 0;
+        mc.addEventListener('toolchange', () => changes++);
+
+        WebMcp.register(payload([tool(), tool({ name: 'other-tool' })]));
+        await flush();
+
+        expect(mc.names()).toEqual(['other-tool', 'weather-tool']);
+        expect(mc.registerCalls).toHaveLength(2);
+        expect(mc.registerCalls[0].options.signal.aborted).toBe(false);
+        expect(changes).toBe(1);
+    });
+
+    it('replaces changed tools when a server is registered again, without duplicates or leaks', async () => {
         WebMcp.register(payload());
+        await flush();
+        WebMcp.register(payload([tool({ description: 'Changed.' })]));
         await flush();
 
         expect(mc.names()).toEqual(['weather-tool']);
         expect(mc.registerCalls).toHaveLength(2);
         expect(mc.registerCalls[0].options.signal.aborted).toBe(true);
         expect(mc.registerCalls[1].options.signal.aborted).toBe(false);
+    });
+
+    it('runs kept tools with the new payload (fresh CSRF token)', async () => {
+        WebMcp.register(payload());
+        await flush();
+        WebMcp.register(payload([tool()], { csrf: 'csrf-2' }));
+        await flush();
+        fetchMock.mockResolvedValue(ok('sunny'));
+
+        await mc.call('weather-tool', { city: 'x' });
+
+        expect(fetchMock.mock.calls[0][1].headers['X-CSRF-TOKEN']).toBe('csrf-2');
     });
 
     it('reads the embedded manifest by slug and reports invalid ones', async () => {
@@ -303,7 +370,7 @@ describe('session execution', () => {
         const failed = listen('failed');
 
         const controller = new AbortController();
-        const pending = mc.executeTool('weather-tool', { city: 'x' }, { signal: controller.signal });
+        const pending = mc.executeTool(mc.tool('weather-tool'), { city: 'x' }, { signal: controller.signal });
 
         await flush();
         controller.abort();
@@ -407,7 +474,7 @@ describe('session execution', () => {
         WebMcp.configure({ errors: 'reject' });
         fetchMock.mockResolvedValue(json({ content: [{ type: 'text', text: 'nope' }], isError: true }));
 
-        await expect(mc.executeTool('weather-tool', { city: 'x' })).rejects.toMatchObject({ name: 'UnknownError' });
+        await expect(mc.executeTool(mc.tool('weather-tool'), { city: 'x' })).rejects.toMatchObject({ name: 'OperationError' });
     });
 
     it('answers unexpected response bodies with an error result', async () => {
@@ -709,7 +776,7 @@ describe('bridge execution', () => {
         }));
 
         const controller = new AbortController();
-        const pending = mc.executeTool('renamed', {}, { signal: controller.signal });
+        const pending = mc.executeTool(mc.tool('renamed'), {}, { signal: controller.signal });
         await flush();
         controller.abort();
 
@@ -827,6 +894,74 @@ describe('dialog confirm', () => {
         dialog.dispatchEvent(new Event('close'));
 
         await expect(pending).resolves.toBe(false);
+    });
+
+    it('names the dialog, shows the arguments and uses the localized texts', async () => {
+        HTMLDialogElement.prototype.showModal = function showModal() {
+            this.open = true;
+        };
+        const messages = { question: 'Darf der Assistent „:title“ ausführen?', allow: 'Erlauben', cancel: 'Abbrechen', arguments: 'Mit diesen Argumenten:' };
+
+        const pending = WebMcp.createDialogConfirm()({ tool: 't', title: 'Löschen', description: 'Löscht die Bestellung.', arguments: { orderId: 42 }, messages });
+        const dialog = document.querySelector('dialog');
+        const heading = document.getElementById(dialog.getAttribute('aria-labelledby'));
+        const body = document.getElementById(dialog.getAttribute('aria-describedby'));
+
+        expect(heading.textContent).toBe('Darf der Assistent „Löschen“ ausführen?');
+        expect(body.textContent).toContain('Löscht die Bestellung.');
+        expect(dialog.querySelector('pre').textContent).toContain('"orderId": 42');
+        expect(dialog.querySelector('pre').style.whiteSpace).toBe('pre-wrap');
+        expect(dialog.querySelector('pre').style.overflowWrap).toBe('anywhere');
+        expect(dialog.querySelector('pre').style.overflow).toBe('auto');
+        expect([...dialog.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['Abbrechen', 'Erlauben']);
+
+        dialog.returnValue = 'cancel';
+        dialog.dispatchEvent(new Event('close'));
+        await pending;
+    });
+
+    it('omits the argument block when there are no arguments', async () => {
+        HTMLDialogElement.prototype.showModal = function showModal() {
+            this.open = true;
+        };
+
+        const pending = WebMcp.createDialogConfirm()({ tool: 't', title: 'T', description: 'd', arguments: {} });
+        const dialog = document.querySelector('dialog');
+
+        expect(dialog.querySelector('pre')).toBeNull();
+        dialog.returnValue = 'cancel';
+        dialog.dispatchEvent(new Event('close'));
+        await pending;
+    });
+
+    it('shows the arguments in the window.confirm fallback', async () => {
+        resetForTests();
+        WebMcp.configure({ fetch: fetchMock });
+        const spy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+        WebMcp.register(payload([tool({ name: 'delete-tool', title: 'Delete', confirm: true })], { messages: { question: 'Run ":title"?' } }));
+        await flush();
+
+        await mc.call('delete-tool', { id: 7 });
+
+        expect(spy.mock.calls[0][0]).toContain('Run "Delete"?');
+        expect(spy.mock.calls[0][0]).toContain('"id": 7');
+        spy.mockRestore();
+    });
+
+    it('passes the manifest texts to custom confirm hooks, also for scopes without their own', async () => {
+        resetForTests();
+        const confirm = vi.fn().mockResolvedValue(false);
+        WebMcp.configure({ fetch: fetchMock, confirm });
+        const messages = { question: 'Q :title', allow: 'A', cancel: 'C', arguments: 'Args' };
+        WebMcp.register(payload([tool({ name: 'delete-tool', confirm: true })], { messages }));
+        WebMcp.registerScope('scope-1', [{ name: 'scoped', description: 'd', confirm: true }], { runner: () => 'ran' });
+        await flush();
+
+        await mc.call('delete-tool', {});
+        await mc.call('scoped', {});
+
+        expect(confirm.mock.calls[0][0].messages).toEqual(messages);
+        expect(confirm.mock.calls[1][0].messages).toEqual(messages);
     });
 });
 
@@ -1105,6 +1240,44 @@ describe('embed (manifest from another origin)', () => {
 
         expect((await mc.call('weather-tool', { city: 'x' })).isError).toBe(true);
         expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('mirrors x-mcp-header arguments into Mcp-Param headers like laravel/mcp expects', async () => {
+        const headers = [
+            { path: ['region'], header: 'Mcp-Param-Region', type: 'string' },
+            { path: ['limit'], header: 'Mcp-Param-Limit', type: 'integer' },
+            { path: ['filter', 'open'], header: 'Mcp-Param-Open', type: 'boolean' },
+            { path: ['city'], header: 'Mcp-Param-City', type: 'string' },
+            { path: ['missing'], header: 'Mcp-Param-Missing', type: 'string' },
+        ];
+        const mirrored = tool({ name: 'orders', mode: 'bridge', bridge: { method: 'tools/call', name: 'orders', headers } });
+        fetchMock.mockResolvedValue(json({ jsonrpc: '2.0', id: 1, result: { content: [{ type: 'text', text: 'ok' }] } }));
+        await WebMcp.embed(remote + '/webmcp/weather/embed/manifest', embedPayload([mirrored]));
+        await flush();
+
+        await mc.call('orders', { region: 'eu', limit: 5, filter: { open: true }, city: 'Köln' });
+
+        const sent = fetchMock.mock.calls[0][1].headers;
+        expect(sent['Mcp-Param-Region']).toBe('eu');
+        expect(sent['Mcp-Param-Limit']).toBe('5');
+        expect(sent['Mcp-Param-Open']).toBe('true');
+        expect(sent['Mcp-Param-City']).toBe('=?base64?S8O2bG4=?=');
+        expect(sent).not.toHaveProperty('Mcp-Param-Missing');
+    });
+
+    it('registers an inlined manifest without fetching it, and still refuses foreign endpoints', async () => {
+        const registered = await WebMcp.embed(remote + '/webmcp/weather/embed/manifest', embedPayload([bridgeTool()]));
+        await flush();
+
+        expect(registered.tools).toEqual(['renamed']);
+        expect(fetchMock).not.toHaveBeenCalled();
+
+        WebMcp.unregister('weather');
+        await WebMcp.embed(remote + '/webmcp/weather/embed/manifest', embedPayload([bridgeTool()], { endpoints: { bridge: 'https://evil.example/mcp' } }));
+        await flush();
+
+        expect((await mc.call('renamed', {})).isError).toBe(true);
+        expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it('refreshes from the embedded origin without credentials', async () => {

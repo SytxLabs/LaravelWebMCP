@@ -43,6 +43,21 @@ final readonly class Localizer
     }
 
     /**
+     * Texts of the browser's confirm prompt. `:title` stays in the question; the runtime fills it in.
+     *
+     * @return array{question: string, allow: string, cancel: string, arguments: string}
+     */
+    public function confirmMessages(): array
+    {
+        return [
+            'question' => $this->message('confirm_question'),
+            'allow' => $this->message('confirm_allow'),
+            'cancel' => $this->message('confirm_cancel'),
+            'arguments' => $this->message('confirm_arguments'),
+        ];
+    }
+
+    /**
      * Localizes every `title` and `description` string of a JSON Schema (properties, items, nested schemas).
      * Keys named "description" that hold a schema (a property called "description") are left alone.
      *

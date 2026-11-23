@@ -54,6 +54,8 @@ class Form extends Component
             'formAction' => $this->action,
             'formMethod' => in_array($method, ['get', 'post', 'put', 'patch', 'delete'], true) ? $method : 'post',
             'withControls' => $this->controls,
+            'confirmMessages' => $prepared['definition']->confirm ? app(Localizer::class)->confirmMessages() : null,
+            'noSelection' => app(Localizer::class)->message('no_selection'),
             'submitLabel' => $this->submit !== null ? app(Localizer::class)->text($this->submit) : app(Localizer::class)->message('submit'),
             'idPrefix' => 'webmcp-'.preg_replace('/[^A-Za-z0-9_-]/', '-', $prepared['definition']->name),
         ]);

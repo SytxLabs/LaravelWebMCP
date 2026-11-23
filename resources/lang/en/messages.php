@@ -11,4 +11,9 @@ return [
     'generic_reader_description' => 'Reads one of the exposed resources by its URI. Available URIs: :uris.',
     'generic_reader_uri' => 'The resource URI to read.',
     'submit' => 'Submit',
+    'no_selection' => 'No selection',
+    'confirm_question' => 'Allow the assistant to run ":title"?',
+    'confirm_allow' => 'Allow',
+    'confirm_cancel' => 'Cancel',
+    'confirm_arguments' => 'With these arguments:',
 ];

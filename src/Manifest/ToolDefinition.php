@@ -22,6 +22,8 @@ final readonly class ToolDefinition
      * @param class-string $source
      * @param list<string> $variableNames Resource templates: URI template variables.
      * @param list<string> $allowedUris Generic reader: URIs / templates it may resolve.
+     * @param array<string, mixed>|null $outputSchema JSON Schema of the result, registered as `outputSchema`.
+     * @param list<array{path: list<string>, header: string, type: string}> $mirroredHeaders Arguments laravel/mcp (1.2.1+) expects as `Mcp-Param-*` headers on Bridge calls.
      */
     public function __construct(
         public string $server,
@@ -41,6 +43,8 @@ final readonly class ToolDefinition
         public array $variableNames = [],
         public ?string $variablePattern = null,
         public array $allowedUris = [],
+        public ?array $outputSchema = null,
+        public array $mirroredHeaders = [],
     ) {
     }
 
@@ -64,6 +68,7 @@ final readonly class ToolDefinition
             'title' => $this->title,
             'description' => $this->description,
             'inputSchema' => $this->inputSchema,
+            ...($this->outputSchema !== null ? ['outputSchema' => $this->outputSchema] : []),
             'mode' => $this->mode->value,
             'kind' => $this->kind,
             'confirm' => $this->confirm,

@@ -52,6 +52,9 @@ function toDefinition(spec) {
     if (schema) {
         def.inputSchema = schema;
     }
+    if (spec.outputSchema) {
+        def.outputSchema = spec.outputSchema;
+    }
     if (Array.isArray(spec.exposedTo)) {
         def.exposedTo = [...spec.exposedTo];
     }

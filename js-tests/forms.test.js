@@ -230,6 +230,19 @@ describe('agent-invoked submits', () => {
         expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ tool: 'search', description: 'Search the shop', arguments: expect.objectContaining({ query: 'x' }) }));
     });
 
+    it('hands the confirm texts the Blade component rendered to the confirm hook', async () => {
+        const confirm = vi.fn().mockResolvedValue(false);
+        WebMcp.configure({ confirm });
+        const form = makeForm({ confirm: true });
+        form.setAttribute('data-webmcp-messages', JSON.stringify({ question: 'Darf der Assistent „:title“ ausführen?', allow: 'Erlauben' }));
+
+        const { event, calls } = submitEvent();
+        form.dispatchEvent(event);
+        await calls[0].promise;
+
+        expect(confirm.mock.calls[0][0].messages).toEqual({ question: 'Darf der Assistent „:title“ ausführen?', allow: 'Erlauben' });
+    });
+
     it('runs consequential forms once the user confirmed', async () => {
         WebMcp.configure({ confirm: vi.fn().mockResolvedValue(true) });
         fetchMock.mockResolvedValue(ok('done'));

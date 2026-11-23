@@ -59,6 +59,21 @@ export function collect(form) {
 }
 
 /**
+ * Confirm texts the Blade component rendered in the page locale, or undefined.
+ *
+ * @param {HTMLFormElement} form
+ * @returns {Record<string, string> | undefined}
+ */
+function readMessages(form) {
+    try {
+        const messages = JSON.parse(form.getAttribute('data-webmcp-messages') || 'null');
+        return messages && typeof messages === 'object' ? messages : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/**
  * Runs the form's tool through its Session route and returns the result for `respondWith`.
  *
  * @param {HTMLFormElement} form
@@ -74,6 +89,7 @@ export async function run(form) {
             title: form.getAttribute('toolname') || '',
             description: form.getAttribute('tooldescription') || '',
             arguments: args,
+            messages: readMessages(form),
         });
 
         if (!accepted) {

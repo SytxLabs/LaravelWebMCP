@@ -230,7 +230,7 @@ return [
     |--------------------------------------------------------------------------
     */
     'features' => [
-        'output_schema' => false,       // WebMCP defines no outputSchema (#9); adds the key as extra dictionary member
+        'output_schema' => true,        // register the tool's outputSchema() (spec #254, Chrome 159+); older browsers ignore it
         'structured_content' => false,  // add `structuredContent` next to the JSON text of Response::structured()
     ],
 ];
