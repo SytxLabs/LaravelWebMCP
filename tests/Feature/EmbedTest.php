@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Laravel\Mcp\Facades\Mcp;
+use Laravel\Mcp\Server\Middleware\ValidateOrigin;
 use SytxLabs\LaravelWebMcp\Facades\WebMcp;
 use SytxLabs\LaravelWebMcp\Http\Middleware\EnforceWebMcpExposure;
 use SytxLabs\LaravelWebMcp\Tests\Fixtures;
@@ -102,7 +103,9 @@ it('lets allowed page origins past laravel/mcp origin validation for that reques
 
     $call(SHOP)->assertOk();
     expect(config('mcp.allowed_origins'))->toBe(['https://admin.example.com']);
-    $call('https://evil.example')->assertForbidden()->assertJsonPath('error.message', 'Forbidden: The request origin is not allowed.');
+    if (class_exists(ValidateOrigin::class)) { // laravel/mcp 1.2+
+        $call('https://evil.example')->assertForbidden()->assertJsonPath('error.message', 'Forbidden: The request origin is not allowed.');
+    }
 });
 
 it('leaves paths outside embed mode alone', function () {

@@ -8,6 +8,7 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Description;
+use Laravel\Mcp\Server\Methods\CallTool;
 use Laravel\Mcp\Server\Tool;
 use Laravel\Mcp\Support\MirroredParameters;
 use SytxLabs\LaravelWebMcp\Attributes\WebMcp as WebMcpAttribute;
@@ -64,6 +65,9 @@ it('tells the browser which arguments laravel/mcp expects as Mcp-Param headers',
 });
 
 it('matches what laravel/mcp checks: calls without the header fail, calls with it run', function () {
+    if (!method_exists(CallTool::class, 'validateMirroredHeaders')) {
+        $this->markTestSkipped('laravel/mcp < 1.2.1 does not check Mcp-Param headers on the server.');
+    }
     $call = fn (array $headers) => $this->postJson('/mcp/region', ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => ['name' => 'region-orders-tool', 'arguments' => ['region' => 'eu']]], $headers);
 
     expect($call([])->json('error.message'))->toContain('Mcp-Param-Region');
